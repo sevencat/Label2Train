@@ -1,0 +1,57 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="using:Label2Train.App.Localization"
+        x:Class="Label2Train.App.Views.SyntheticProjectWindow"
+        Title="{l:Loc Synthetic.Title}"
+        Width="520" SizeToContent="Height"
+        CanResize="False"
+        WindowStartupLocation="CenterOwner">
+
+  <StackPanel Margin="20" Spacing="10">
+    <TextBlock Text="{l:Loc Synthetic.Title}" FontSize="16" FontWeight="SemiBold" />
+    <TextBlock Text="{l:Loc Synthetic.Hint}" Opacity="0.6" FontSize="12" TextWrapping="Wrap" />
+
+    <Grid ColumnDefinitions="130,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto" RowSpacing="8" Margin="0,6,0,0">
+
+      <TextBlock Grid.Row="0" Text="{l:Loc Project.Name}" FontWeight="SemiBold" VerticalAlignment="Center" />
+      <TextBox Grid.Row="0" Grid.Column="1" x:Name="NameBox" MaxLength="128" />
+
+      <TextBlock Grid.Row="1" Text="{l:Loc Synthetic.ImageCount}" VerticalAlignment="Center" />
+      <NumericUpDown Grid.Row="1" Grid.Column="1" x:Name="CountBox"
+                     Minimum="1" Maximum="2000" Increment="1" Value="30" FormatString="0" />
+
+      <TextBlock Grid.Row="2" Text="{l:Loc Synthetic.ShapesPerImage}" VerticalAlignment="Center" />
+      <Grid Grid.Row="2" Grid.Column="1" ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="8">
+        <TextBlock Grid.Column="0" Text="{l:Loc Synthetic.Min}" Opacity="0.7" VerticalAlignment="Center" />
+        <NumericUpDown Grid.Column="1" x:Name="MinShapesBox"
+                       Minimum="1" Maximum="10" Increment="1" Value="1" FormatString="0" />
+        <TextBlock Grid.Column="2" Text="{l:Loc Synthetic.Max}" Opacity="0.7" VerticalAlignment="Center" />
+        <NumericUpDown Grid.Column="3" x:Name="MaxShapesBox"
+                       Minimum="1" Maximum="10" Increment="1" Value="3" FormatString="0" />
+      </Grid>
+
+      <TextBlock Grid.Row="3" Text="{l:Loc Synthetic.ImageSize}" VerticalAlignment="Center" />
+      <Grid Grid.Row="3" Grid.Column="1" ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="8">
+        <TextBlock Grid.Column="0" Text="{l:Loc Synthetic.Width}" Opacity="0.7" VerticalAlignment="Center" />
+        <NumericUpDown Grid.Column="1" x:Name="WidthBox"
+                       Minimum="16" Maximum="4096" Increment="16" Value="640" FormatString="0" />
+        <TextBlock Grid.Column="2" Text="{l:Loc Synthetic.Height}" Opacity="0.7" VerticalAlignment="Center" />
+        <NumericUpDown Grid.Column="3" x:Name="HeightBox"
+                       Minimum="16" Maximum="4096" Increment="16" Value="480" FormatString="0" />
+      </Grid>
+
+      <TextBlock Grid.Row="4" Text="{l:Loc Synthetic.ValRatio}" VerticalAlignment="Center" />
+      <NumericUpDown Grid.Row="4" Grid.Column="1" x:Name="ValRatioBox"
+                     Minimum="0" Maximum="90" Increment="5" Value="20" FormatString="0" />
+
+    </Grid>
+
+    <TextBlock x:Name="ErrorText" Foreground="#EF4444" FontSize="12" MinHeight="16" TextWrapping="Wrap" />
+
+    <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right" Margin="0,4,0,0">
+      <Button Content="{l:Loc Common.Cancel}" Click="OnCancel" IsCancel="True" />
+      <Button Content="{l:Loc Synthetic.Action}" Click="OnConfirm" IsDefault="True" />
+    </StackPanel>
+  </StackPanel>
+
+</Window>

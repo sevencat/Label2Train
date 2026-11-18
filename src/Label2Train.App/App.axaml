@@ -9,6 +9,9 @@
     <themes:MaterialTheme BaseTheme="Light" PrimaryColor="DeepPurple" SecondaryColor="Teal" />
     <materialIcons:MaterialIconStyles />
 
+    <!-- OxyPlot：训练曲线用的 PlotView 是模板控件，不加载这个主题就没有模板和画笔，图表一片空白 -->
+    <StyleInclude Source="avares://OxyPlot.Avalonia/Themes/Default.axaml" />
+
     <!-- 整体字号：正文默认 16，比 Material 默认的 14 大两档 -->
     <Style Selector="Window">
       <Setter Property="FontSize" Value="16" />

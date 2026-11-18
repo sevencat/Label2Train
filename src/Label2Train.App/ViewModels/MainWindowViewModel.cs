@@ -12,6 +12,7 @@ using Label2Train.Core.Imaging;
 using Label2Train.Core.Infrastructure;
 using Label2Train.Core.Infrastructure.Logging;
 using Label2Train.Core.Localization;
+using Label2Train.Core.Simulation;
 using Label2Train.Core.Storage;
 using Label2Train.Label;
 
@@ -37,6 +38,7 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly TinyLabelProjectService _projects;
     private readonly TinyLabelImageService _images;
     private readonly TinyLabelClassService _classService;
+    private readonly SyntheticProjectSeeder _synthetic;
     private readonly DatasetExportService _exporter;
     private readonly DatasetStoreResolver _resolver;
     private readonly AppSettings _settings;
@@ -185,6 +187,7 @@ public partial class MainWindowViewModel : ObservableObject
         TinyLabelProjectService projects,
         TinyLabelImageService images,
         TinyLabelClassService classService,
+        SyntheticProjectSeeder synthetic,
         DatasetExportService exporter,
         DatasetStoreResolver resolver,
         AppSettings settings,
@@ -199,6 +202,7 @@ public partial class MainWindowViewModel : ObservableObject
         _projects = projects;
         _images = images;
         _classService = classService;
+        _synthetic = synthetic;
         _exporter = exporter;
         _resolver = resolver;
         _settings = settings;
@@ -862,6 +866,40 @@ public partial class MainWindowViewModel : ObservableObject
             Loc.Get("Label.ExportAction")).ConfigureAwait(true);
     }
 
+    /// <summary>
+    /// 导入前校验：选中的目录是不是目标形态的数据集（选错当场拦下，不用等建库才报错）。
+    /// 歧义目录只要含目标形态的候选就算通过。
+    /// </summary>
+    public async Task<DatasetImportCheck> CheckImportAsync(
+        string sourcePath,
+        DatasetFormat format,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourcePath);
+
+        try
+        {
+            DatasetProbe probe = await _importer
+                .DetectAsync(StorageLocation.FromPath(sourcePath), ct)
+                .ConfigureAwait(true);
+
+            bool matches = probe.Format == format
+                || (probe.Format == DatasetFormat.Ambiguous && probe.CandidateOf(format) is not null);
+
+            return matches
+                ? new DatasetImportCheck(true, probe, probe.Message)
+                : new DatasetImportCheck(
+                    false,
+                    probe,
+                    Loc.Format("Import.WrongFormat", format.ToDisplayName(), probe.Format.ToDisplayName()));
+        }
+        catch (Exception error)
+        {
+            _logger.LogWarning(error, "校验导入目录失败：{Path}", sourcePath);
+            return new DatasetImportCheck(false, null, Loc.Format("Import.DetectFailed", error.Message));
+        }
+    }
+
     /// <summary>导入 YOLO / RF-DETR 数据集作为新项目（这里会建库）。</summary>
     public async Task ImportAsync(ImportRequest request, CancellationToken ct = default)
     {
@@ -898,6 +936,53 @@ public partial class MainWindowViewModel : ObservableObject
         {
             _logger.LogError(error, "导入数据集失败");
             Report(Loc.Format("Label.ImportFailed", error.Message));
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    /// <summary>
+    /// 生成模拟数据：在当前库里建一个填满图片与标注的项目，图片进
+    /// <c>projects/{id}/images/</c>、标注进数据库，不写任何外部数据集目录。
+    /// </summary>
+    public async Task GenerateSyntheticProjectAsync(SyntheticProjectDraft draft, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(draft);
+
+        if (IsBusy)
+        {
+            return;
+        }
+
+        IsBusy = true;
+        Status = Loc.Get("Label.SyntheticRunning");
+
+        try
+        {
+            SyntheticProjectReport report = await _synthetic
+                .CreateAsync(
+                    StorageLocation.FromPath(DataDirectory),
+                    new SyntheticProjectOptions(
+                        draft.Name,
+                        draft.ImageCount,
+                        draft.ImageWidth,
+                        draft.ImageHeight,
+                        draft.MinShapes,
+                        draft.MaxShapes,
+                        draft.ValRatio),
+                    ct)
+                .ConfigureAwait(true);
+
+            Report(Loc.Format("Label.SyntheticDone", report.ImageCount, report.ShapeCount));
+
+            await RefreshProjectsAsync(report.ProjectId, ct).ConfigureAwait(true);
+        }
+        catch (Exception error)
+        {
+            _logger.LogError(error, "生成模拟数据失败");
+            Report(Loc.Format("Label.SyntheticFailed", error.Message));
         }
         finally
         {

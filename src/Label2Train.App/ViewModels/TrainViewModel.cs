@@ -7,6 +7,7 @@ using OxyPlot;
 using OxyPlot.Axes;
 using OxyPlot.Legends;
 using OxyPlot.Series;
+using Label2Train.App.Rendering;
 using Label2Train.Core;
 using Label2Train.Core.Dataset;
 using Label2Train.Core.Dataset.TinyLabel;
@@ -117,6 +118,7 @@ public partial class TrainViewModel : ObservableObject
     private const string GridColor = "#CFD8DC";
 
     private readonly LinearAxis _epochAxis;
+    private readonly LinearAxis _lossAxis;
     private readonly LineSeries _map50Series;
     private readonly LineSeries _map5095Series;
     private readonly LineSeries _lossSeries;
@@ -198,14 +200,15 @@ public partial class TrainViewModel : ObservableObject
         _exporter = exporter;
         _selectedModel = ModelFamilies[0];
 
-        // 空图时给个 0~10 的正向刻度，出点后交回自动范围
+        // 轴范围一律给实数：OxyPlot 2.x 在算刻度时会对 NaN 取符号，
+        // 一旦某根轴的 Minimum/Maximum 是 NaN 就抛 ArithmeticException，整张图都画不出来
         _epochAxis = CreateAxis("epoch", AxisPosition.Bottom, minimum: 0, maximum: 10, minimumStep: 1);
         LinearAxis mapAxis = CreateAxis("mAP", AxisPosition.Left, minimum: 0, maximum: 1, minimumStep: 0.1);
-        LinearAxis lossAxis = CreateAxis("loss", AxisPosition.Right);
+        _lossAxis = CreateAxis("loss", AxisPosition.Right, minimum: 0, maximum: 1);
 
         _map50Series = CreateSeries("mAP50", "#2E7D32", mapAxis.Key);
         _map5095Series = CreateSeries("mAP50-95", "#6A1B9A", mapAxis.Key);
-        _lossSeries = CreateSeries("loss", "#00796B", lossAxis.Key);
+        _lossSeries = CreateSeries("loss", "#00796B", _lossAxis.Key);
 
         Plot = new PlotModel
         {
@@ -214,6 +217,8 @@ public partial class TrainViewModel : ObservableObject
             PlotAreaBorderColor = OxyColor.Parse(GridColor),
             PlotAreaBorderThickness = new OxyThickness(0, 0, 0, 1),
             IsLegendVisible = true,
+            // SimdSkia 后端不容忍 OxyPlot.Avalonia 画线段的方式，不包一层图表只会渲染出报错文字
+            RenderingDecorator = context => new SegmentSafeRenderContext(context),
         };
 
         Plot.Legends.Add(new Legend
@@ -227,7 +232,7 @@ public partial class TrainViewModel : ObservableObject
 
         Plot.Axes.Add(_epochAxis);
         Plot.Axes.Add(mapAxis);
-        Plot.Axes.Add(lossAxis);
+        Plot.Axes.Add(_lossAxis);
 
         Plot.Series.Add(_map50Series);
         Plot.Series.Add(_map5095Series);
@@ -398,17 +403,15 @@ public partial class TrainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 列出用户选中的库文件（任意位置的 <c>label2train.db</c>）里的项目：
-    /// 用独立只读连接查，不能借启动时那个工作库，否则读到的永远是默认库。
+    /// 列出标注端当前库（<c>label2train.db</c>）里的项目：训练直接用标注库，不再让用户挑库文件。
+    /// 用独立只读连接查，避免和标注页的工作连接互相影响。
     /// </summary>
-    public async Task<IReadOnlyList<TinyLabelProjectSummary>> ListLibraryProjectsAsync(
-        string databaseFile,
-        CancellationToken ct = default)
+    public async Task<IReadOnlyList<TinyLabelProjectSummary>> ListLibraryProjectsAsync(CancellationToken ct = default)
     {
         try
         {
             return await Task.Run(
-                    () => TinyLabelProjectCatalog.ReadFile(databaseFile, _logger, ct),
+                    () => TinyLabelProjectCatalog.ReadFile(_database.Path, _logger, ct),
                     ct)
                 .ConfigureAwait(true);
         }
@@ -421,19 +424,19 @@ public partial class TrainViewModel : ObservableObject
         }
     }
 
-    /// <summary>上次用过的 TinyLabel 库文件（label2train.db 全路径）；没选过就是空串。</summary>
-    public string LastLibraryFile => _settings.LastTrainLibrary;
+    /// <summary>训练要用的库：固定为标注端当前库。</summary>
+    public string LibraryFile => _database.Path;
 
-    /// <summary>上次在该库里选来训练的项目 Id；0 表示没记过。</summary>
+    /// <summary>上次在标注库里选来训练的项目 Id；0 表示没记过。</summary>
     public long LastLibraryProjectId => _settings.LastTrainLibraryProjectId;
 
-    /// <summary>打开指定库（label2train.db）里的某个项目当训练数据集，并把「库 + 项目」记进配置。</summary>
+    /// <summary>打开标注库里的某个项目当训练数据集，并记住项目 Id（下次启动自动恢复）。</summary>
     public async Task OpenLibraryProjectAsync(
-        string databaseFile,
         long projectId,
         string source,
         CancellationToken ct = default)
     {
+        string databaseFile = _database.Path;
         string? folder = Path.GetDirectoryName(databaseFile);
 
         if (string.IsNullOrWhiteSpace(folder))
@@ -456,7 +459,6 @@ public partial class TrainViewModel : ObservableObject
 
             await ApplyOpenedAsync(opened, source, ct).ConfigureAwait(true);
 
-            _settings.LastTrainLibrary = databaseFile;
             _settings.LastTrainLibraryProjectId = projectId;
             _settings.LastTrainDataDirectory = folder;
             SaveSettings();
@@ -469,7 +471,7 @@ public partial class TrainViewModel : ObservableObject
         }
     }
 
-    /// <summary>启动时把上次的 TinyLabel 项目打开；库文件或项目没了就静默跳过。</summary>
+    /// <summary>启动时把上次训练的标注项目重新打开；库固定是标注端当前库，项目没了就静默跳过。</summary>
     public async Task RestoreLastLibraryAsync(CancellationToken ct = default)
     {
         // 没记过项目就不自动打开，避免启动就替用户挑了数据集
@@ -478,13 +480,7 @@ public partial class TrainViewModel : ObservableObject
             return;
         }
 
-        // 记的库文件没了就退回标注端那个库
-        string database = _settings.LastTrainLibrary;
-
-        if (string.IsNullOrWhiteSpace(database) || !File.Exists(database))
-        {
-            database = _database.Path;
-        }
+        string database = _database.Path;
 
         if (!File.Exists(database))
         {
@@ -522,7 +518,7 @@ public partial class TrainViewModel : ObservableObject
 
         _logger.LogInformation("启动恢复标注项目 {Project}（库 {Database}）", project.Name, database);
 
-        await OpenLibraryProjectAsync(database, project.Id, $"{project.Name} · #{project.Id}", ct)
+        await OpenLibraryProjectAsync(project.Id, $"{project.Name} · #{project.Id}", ct)
             .ConfigureAwait(true);
     }
 
@@ -747,8 +743,14 @@ public partial class TrainViewModel : ObservableObject
         _map5095Series.Points.Add(new DataPoint(epoch, map5095));
         _lossSeries.Points.Add(new DataPoint(epoch, loss));
 
-        // 有数据就交回自动范围，否则刻度会一直被 0~10 卡住
-        _epochAxis.Maximum = double.NaN;
+        // 范围给实数而不是 NaN（NaN 会让 OxyPlot 算刻度时崩）：epoch 轴跟着轮数走，
+        // loss 轴只往上放，loss 掉下去时曲线仍在框里
+        _epochAxis.Maximum = Math.Max(10d, epoch + 1);
+
+        if (double.IsFinite(loss))
+        {
+            _lossAxis.Maximum = Math.Max(_lossAxis.Maximum, loss * 1.2);
+        }
 
         HasChartData = true;
         Plot.InvalidatePlot(updateData: true);
@@ -762,6 +764,7 @@ public partial class TrainViewModel : ObservableObject
         _lossSeries.Points.Clear();
 
         _epochAxis.Maximum = 10;
+        _lossAxis.Maximum = 1;
         HasChartData = false;
         Plot.InvalidatePlot(updateData: true);
     }
@@ -777,9 +780,14 @@ public partial class TrainViewModel : ObservableObject
             Key = title,
             Title = title,
             Position = position,
-            Minimum = minimum,
-            Maximum = maximum,
-            MinimumMajorStep = minimumStep,
+            // 兜底：谁忘了传范围也不留 NaN，默认给 0~1
+            Minimum = double.IsNaN(minimum) ? 0 : minimum,
+            Maximum = double.IsNaN(maximum) ? 1 : maximum,
+            // 步长下限必须是 0（Axis 的默认值），不能是 NaN：OxyPlot 结尾会做
+            // ActualMajorStep = Math.Max(算出来的步长, MinimumMajorStep)，NaN 会把它整成 NaN，
+            // 随后 CreateTickValues 里 Math.Sign(NaN) 抛 ArithmeticException，整张图不渲染
+            MinimumMajorStep = double.IsNaN(minimumStep) ? 0 : minimumStep,
+            MinimumMinorStep = 0,
             MajorGridlineStyle = LineStyle.Solid,
             MajorGridlineColor = OxyColor.Parse(GridColor),
             MinorGridlineStyle = LineStyle.None,

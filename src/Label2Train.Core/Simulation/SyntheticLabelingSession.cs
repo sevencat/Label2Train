@@ -177,7 +177,8 @@ public static class SyntheticLabelingSession
         return new SyntheticImportResult(databasePath, projectId, images.Count, annotated, shapeCount, splits);
     }
 
-    private static string BuildLabelmeJson(SyntheticImage image, int jitterPixels, Random random)
+    /// <summary>把一张图的真值写成 labelme JSON（标注存储那一列存的就是这个格式）。</summary>
+    internal static string BuildLabelmeJson(SyntheticImage image, int jitterPixels, Random random)
     {
         using var buffer = new MemoryStream();
 

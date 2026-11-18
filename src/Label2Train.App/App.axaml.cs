@@ -19,8 +19,15 @@ public partial class App : Application
 
     public override void OnFrameworkInitializationCompleted()
     {
-        string[]? args = (ApplicationLifetime as IClassicDesktopStyleApplicationLifetime)?.Args;
-        StartupOptions startup = StartupOptions.Parse(args);
+        // headless 测试（Avalonia.Headless）没有桌面生命周期：数据目录、容器、主窗口
+        // 都交给测试自己安排；生产的桌面入口永远走下面的分支
+        if (ApplicationLifetime is not IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            base.OnFrameworkInitializationCompleted();
+            return;
+        }
+
+        StartupOptions startup = StartupOptions.Parse(desktop.Args);
 
         // 数据目录（库、日志都落这里）先定，再打开库：文件不在就当场建空库
         AppDataPaths.Initialize(startup.DataDirectory);
@@ -51,31 +58,28 @@ public partial class App : Application
             AppDataPaths.DataDirectory,
             startup.DatabasePath);
 
-        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        desktop.MainWindow = services.GetRequiredService<MainWindow>();
+
+        desktop.Exit += (_, _) =>
         {
-            desktop.MainWindow = services.GetRequiredService<MainWindow>();
+            logger.LogInformation("标注应用退出");
 
-            desktop.Exit += (_, _) =>
+            // 容器的 DisposeAsync 会顺带关掉库；窗口已经关了，
+            // 这里只等收尾（超时就不再等，进程反正要退）
+            try
             {
-                logger.LogInformation("标注应用退出");
-
-                // 容器的 DisposeAsync 会顺带关掉库；窗口已经关了，
-                // 这里只等收尾（超时就不再等，进程反正要退）
-                try
-                {
-                    Task.Run(async () => await services.DisposeAsync()).Wait(TimeSpan.FromSeconds(5));
-                }
-                catch (Exception ex)
-                {
-                    logger.LogWarning(ex, "释放服务容器时报错");
-                }
-                finally
-                {
-                    // 容器已经释放，再留着引用只会让后续解析调到已释放的 provider
-                    BeanFactory.Reset();
-                }
-            };
-        }
+                Task.Run(async () => await services.DisposeAsync()).Wait(TimeSpan.FromSeconds(5));
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "释放服务容器时报错");
+            }
+            finally
+            {
+                // 容器已经释放，再留着引用只会让后续解析调到已释放的 provider
+                BeanFactory.Reset();
+            }
+        };
 
         base.OnFrameworkInitializationCompleted();
     }

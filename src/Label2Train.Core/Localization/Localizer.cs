@@ -31,6 +31,9 @@ public sealed class Localizer : INotifyPropertyChanged
         ["Common.Confirm"] = "确定",
         ["Common.Browse"] = "浏览…",
         ["Common.Language"] = "语言",
+        // ── 窗口标题栏按钮 ──
+        ["Common.Minimize"] = "最小化",
+        ["Common.Maximize"] = "最大化/还原",
 
         // ── 顶栏：标注 / 训练切换 ──
         ["Nav.Annotate"] = "标注",
@@ -39,7 +42,7 @@ public sealed class Localizer : INotifyPropertyChanged
         ["Nav.TrainTip"] = "训练工作台：数据集训练、曲线与模型导出",
 
         // ── 标注主界面 ──
-        ["Label.Title"] = "Label2Train 标注",
+        ["Label.Title"] = "Label2Train",
         ["Label.Running"] = "运行中",
         ["Label.OpenDataDir"] = "打开数据目录",
         ["Label.PickDataDir"] = "选择数据目录（放 label2train.db 的目录）",
@@ -58,6 +61,13 @@ public sealed class Localizer : INotifyPropertyChanged
         ["Label.ProjectStats"] = "图片 {0} 张 · 已处理 {1} 张 · 待处理 {2} 张",
         ["Label.ImportImages"] = "导入图片…",
         ["Label.ImportDataset"] = "导入数据集…",
+        ["Label.ImportMenu"] = "导入数据集 / 生成模拟数据",
+        ["Label.ImportYolo"] = "导入 YOLO 数据集…",
+        ["Label.ImportRfDetr"] = "导入 RF-DETR 数据集…",
+        ["Label.GenerateSynthetic"] = "生成模拟数据…",
+        ["Label.SyntheticRunning"] = "正在生成模拟数据…",
+        ["Label.SyntheticDone"] = "模拟数据已生成：{0} 张图 / {1} 个框",
+        ["Label.SyntheticFailed"] = "生成模拟数据失败：{0}",
         ["Label.ImportFolder"] = "导入文件夹…",
         ["Label.ScanFolder"] = "扫描目录…",
         ["Label.ExportDataset"] = "导出数据集…",
@@ -219,6 +229,7 @@ public sealed class Localizer : INotifyPropertyChanged
 
         // ── 删除确认 ──
         ["Confirm.DeleteTitle"] = "删除项目",
+        ["Confirm.Notice"] = "知道了",
         ["Confirm.DeleteMessage"] = "确定删除「{0}」？图片、标注、类别都会一起删掉，不可恢复。",
 
         // ── 导出对话框 ──
@@ -331,7 +342,30 @@ public sealed class Localizer : INotifyPropertyChanged
         ["Import.NeedSource"] = "请先选择源数据集目录",
         ["Import.Ambiguous"] = "这个目录同时符合多种格式，请在上面选一下形态",
         ["Import.NotImportable"] = "「{0}」不能作为导入来源，请选 YOLO 或 RF-DETR",
+        ["Import.NotImportableTitle"] = "无法导入",
         ["Import.DetectFailed"] = "识别失败：{0}",
+        ["Import.Verifying"] = "正在校验目录…",
+        ["Import.Verified"] = "已识别：{0}（{1}）",
+        ["Import.WrongFormat"] = "这个目录不是 {0} 数据集（识别为 {1}）",
+        ["Import.ProjectNameRequired"] = "请填写项目名",
+        ["Import.SourcePath"] = "源目录：{0}",
+        ["Import.PickTitleFor"] = "选择 {0} 数据集目录",
+
+        // ── 生成模拟数据 ──
+        ["Synthetic.Title"] = "生成模拟数据",
+        ["Synthetic.Hint"] = "在当前库里建一个项目：图片写进 projects/{id}/images/，标注写进数据库，不生成外部数据集文件",
+        ["Synthetic.DefaultName"] = "模拟数据",
+        ["Synthetic.ImageCount"] = "图片数量",
+        ["Synthetic.ShapesPerImage"] = "每张形状数",
+        ["Synthetic.Min"] = "最少",
+        ["Synthetic.Max"] = "最多",
+        ["Synthetic.ImageSize"] = "图片尺寸",
+        ["Synthetic.Width"] = "宽",
+        ["Synthetic.Height"] = "高",
+        ["Synthetic.ValRatio"] = "验证集比例（%）",
+        ["Synthetic.Action"] = "生成",
+        ["Synthetic.ProjectDescription"] = "Label2Train 模拟数据生成",
+        ["Synthetic.ImageCountInvalid"] = "图片数量必须大于 0",
 
         // ── 训练端 ──
         ["Train.Title"] = "Label2Train 训练",
@@ -402,12 +436,11 @@ public sealed class Localizer : INotifyPropertyChanged
         ["Train.Dataset"] = "数据集",
         ["Train.OpenYoloTip"] = "打开 YOLO 数据集目录（data.yaml + images / labels）",
         ["Train.OpenRfDetrTip"] = "打开 RF-DETR 数据集目录（COCO 格式的 annotations/*.json）",
-        ["Train.OpenTinyLabelTip"] = "选择 TinyLabel 数据库 label2train.db",
+        ["Train.OpenTinyLabelTip"] = "从标注库选择项目",
         ["Train.PickProjectTitle"] = "选择标注项目",
         ["Train.NoProjectsInLibrary"] = "这个库里没有标注项目：{0}",
         ["Train.ProjectRow"] = "{0} · #{1} · {2} 张图（已标 {3}）",
-        ["Train.PickLibrary"] = "换一个库…",
-        ["Train.LibraryFile"] = "库：{0}",
+        ["Train.LibraryFile"] = "标注库：{0}",
         ["Train.LibraryMissing"] = "找不到数据库：{0}",
         ["Train.LoadingProjects"] = "正在读取项目…",
 
@@ -526,6 +559,9 @@ public sealed class Localizer : INotifyPropertyChanged
         ["Common.Confirm"] = "OK",
         ["Common.Browse"] = "Browse…",
         ["Common.Language"] = "Language",
+        // ── Window caption buttons ──
+        ["Common.Minimize"] = "Minimize",
+        ["Common.Maximize"] = "Maximize / restore",
 
         // ── Top bar: annotate / train switch ──
         ["Nav.Annotate"] = "Label",
@@ -553,6 +589,13 @@ public sealed class Localizer : INotifyPropertyChanged
         ["Label.ProjectStats"] = "{0} images · {1} done · {2} pending",
         ["Label.ImportImages"] = "Import images…",
         ["Label.ImportDataset"] = "Import dataset…",
+        ["Label.ImportMenu"] = "Import a dataset or generate synthetic data",
+        ["Label.ImportYolo"] = "Import YOLO dataset…",
+        ["Label.ImportRfDetr"] = "Import RF-DETR dataset…",
+        ["Label.GenerateSynthetic"] = "Generate synthetic data…",
+        ["Label.SyntheticRunning"] = "Generating synthetic data…",
+        ["Label.SyntheticDone"] = "Synthetic project created: {0} images / {1} boxes",
+        ["Label.SyntheticFailed"] = "Failed to generate synthetic data: {0}",
         ["Label.ImportFolder"] = "Import folder…",
         ["Label.ScanFolder"] = "Scan folder…",
         ["Label.ExportDataset"] = "Export dataset…",
@@ -714,6 +757,7 @@ public sealed class Localizer : INotifyPropertyChanged
 
         // ── Delete confirm ──
         ["Confirm.DeleteTitle"] = "Delete project",
+        ["Confirm.Notice"] = "Got it",
         ["Confirm.DeleteMessage"] = "Delete \"{0}\"? Images, labels and classes are removed permanently.",
 
         // ── Export dialog ──
@@ -826,7 +870,30 @@ public sealed class Localizer : INotifyPropertyChanged
         ["Import.NeedSource"] = "Pick the source dataset folder first",
         ["Import.Ambiguous"] = "This folder matches several formats; pick one above",
         ["Import.NotImportable"] = "\"{0}\" cannot be imported; choose YOLO or RF-DETR",
+        ["Import.NotImportableTitle"] = "Cannot import",
         ["Import.DetectFailed"] = "Detect failed: {0}",
+        ["Import.Verifying"] = "Checking the folder…",
+        ["Import.Verified"] = "Detected: {0} ({1})",
+        ["Import.WrongFormat"] = "This folder is not a {0} dataset (detected {1})",
+        ["Import.ProjectNameRequired"] = "Please enter a project name",
+        ["Import.SourcePath"] = "Source: {0}",
+        ["Import.PickTitleFor"] = "Pick the {0} dataset folder",
+
+        // ── Synthetic data ──
+        ["Synthetic.Title"] = "Generate synthetic data",
+        ["Synthetic.Hint"] = "Creates a project in the current database: images go to projects/{id}/images/, annotations into the database; no external dataset files",
+        ["Synthetic.DefaultName"] = "Synthetic data",
+        ["Synthetic.ImageCount"] = "Images",
+        ["Synthetic.ShapesPerImage"] = "Shapes per image",
+        ["Synthetic.Min"] = "Min",
+        ["Synthetic.Max"] = "Max",
+        ["Synthetic.ImageSize"] = "Image size",
+        ["Synthetic.Width"] = "W",
+        ["Synthetic.Height"] = "H",
+        ["Synthetic.ValRatio"] = "Validation ratio (%)",
+        ["Synthetic.Action"] = "Generate",
+        ["Synthetic.ProjectDescription"] = "Generated by Label2Train",
+        ["Synthetic.ImageCountInvalid"] = "Image count must be greater than 0",
 
         // ── Trainer ──
         ["Train.Title"] = "Label2Train Trainer",
@@ -897,12 +964,11 @@ public sealed class Localizer : INotifyPropertyChanged
         ["Train.Dataset"] = "Dataset",
         ["Train.OpenYoloTip"] = "Open a YOLO dataset folder (data.yaml + images / labels)",
         ["Train.OpenRfDetrTip"] = "Open an RF-DETR dataset folder (COCO annotations/*.json)",
-        ["Train.OpenTinyLabelTip"] = "Choose the TinyLabel database label2train.db",
+        ["Train.OpenTinyLabelTip"] = "Pick a project from the annotation database",
         ["Train.PickProjectTitle"] = "Choose a labeled project",
         ["Train.NoProjectsInLibrary"] = "No labeled projects in this database: {0}",
         ["Train.ProjectRow"] = "{0} · #{1} · {2} images ({3} labeled)",
-        ["Train.PickLibrary"] = "Change database…",
-        ["Train.LibraryFile"] = "Database: {0}",
+        ["Train.LibraryFile"] = "Annotation database: {0}",
         ["Train.LibraryMissing"] = "Database not found: {0}",
         ["Train.LoadingProjects"] = "Loading projects…",
 

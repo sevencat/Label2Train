@@ -1,13 +1,8 @@
 using Avalonia;
 using ImageFacade;
-using ImageFacade.Backends;
-using ImageFacade.SdcbSimdCodecs;
-using SimdSkia.Avalonia;
+using ImageFacade.SkiaSharp;
 using Label2Train.Core.Imaging;
 using Label2Train.Core.Infrastructure;
-using Sdcb.SimdCodecs.Bmp;
-using Sdcb.SimdCodecs.Jpeg;
-using Sdcb.SimdCodecs.Png;
 
 namespace Label2Train.App;
 
@@ -27,25 +22,8 @@ internal static class Program
         // --data <目录>：数据根目录（项目库 / 配置库 / 日志），默认 exe 同级 data
         AppDataPaths.Initialize(AppDataPaths.ReadDataArgument(args));
         AppDataPaths.EnsureCreated();
-
-        // 图像后端在 exe 入口注册：界面与数据管线共用同一个 SkiaSharp 后端（导入图片读尺寸也用它）
-        ImageBackendBase.RegisterCodec(
-            ImageFormat.Png,
-            PngImageDecoder.Registration,
-            PngImageEncoder.Registration);
-
-        ImageBackendBase.RegisterCodec(
-            ImageFormat.Jpeg,
-            JpegImageDecoder.Registration,
-            JpegImageEncoder.Registration,
-            request => new JpegEncodeOptions { Quality = Math.Clamp(request.Quality, 1, 100) });
-
-        ImageBackendBase.RegisterCodec(
-            ImageFormat.Bmp,
-            BmpImageDecoder.Registration,
-            BmpImageEncoder.Registration,
-            _ => new BmpEncodeOptions());
-        ImageRuntime.Use(new SoftwareBackend());
+        
+        ImageRuntime.Use(new SkiaBackend());
 
         // --import <源目录> --output <目标目录>：把 YOLO / RF-DETR 数据集导成标注项目，不开窗口
         if (ImportCommand.TryParse(args, out ImportCommand command))
@@ -62,15 +40,15 @@ internal static class Program
 
     public static AppBuilder BuildAvaloniaApp()
         => AppBuilder.Configure<App>()
-            // 渲染 + 窗口宿主都走 SimdSkia（纯托管，不再加载 Skia 原生库）
-            .UseStandardRuntimePlatformSubsystem()
-            .UseWin32().With(new Win32PlatformOptions()
+            .UseHarfBuzz()
+            .UseWin32()
+            .UseSkia()
+            // 走 ANGLE（EGL → D3D11）；两条引擎线的 GLES3 着色器与浮点 FBO 都依赖它。
+            // 顺序即优先级：ANGLE 起不来时由 Avalonia 回落到它自己的默认渲染路径。
+            .With(new Win32PlatformOptions
             {
-                RenderingMode = [Win32RenderingMode.Software]
+                RenderingMode = [Win32RenderingMode.AngleEgl],
             })
-            .UseSimdSkia(options =>
-            {
-                //options.UseGpuPreferred();
-            })
+            .WithInterFont()
             .LogToTrace();
 }

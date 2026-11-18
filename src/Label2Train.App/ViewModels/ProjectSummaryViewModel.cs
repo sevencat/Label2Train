@@ -1,4 +1,5 @@
 using Label2Train.Core.Dataset;
+using Label2Train.Core.Dataset.Import;
 using Label2Train.Core.Dataset.TinyLabel;
 using Label2Train.Core.Localization;
 
@@ -59,6 +60,19 @@ public sealed class ProjectSummaryViewModel(TinyLabelProjectSummary summary)
 
 /// <summary>导入对话框的返回值：源目录 + 项目名 + 已识别形态。</summary>
 public sealed record ImportRequest(string SourcePath, string? ProjectName, DatasetFormat Format);
+
+/// <summary>导入前的目录校验结果：<c>IsValid=false</c> 时 <c>Message</c> 说明为什么不能导入。</summary>
+public sealed record DatasetImportCheck(bool IsValid, DatasetProbe? Probe, string Message);
+
+/// <summary>「生成模拟数据」对话框的返回值。</summary>
+public sealed record SyntheticProjectDraft(
+    string Name,
+    int ImageCount,
+    int ImageWidth,
+    int ImageHeight,
+    int MinShapes,
+    int MaxShapes,
+    double ValRatio);
 
 /// <summary>新建 / 编辑项目对话框的返回值。</summary>
 public sealed record ProjectDraft(string Name, string Description);

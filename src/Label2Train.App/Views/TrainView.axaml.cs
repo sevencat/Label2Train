@@ -74,8 +74,8 @@ public partial class TrainView : UserControl
     }
 
     /// <summary>
-    /// 「TinyLabel」：先选一个 <c>label2train.db</c>，读出库里的项目让用户挑一个，
-    /// 再把该项目的图片与标注读成训练数据集。文件框停在上次用的库目录。
+    /// 「TinyLabel」：库固定用标注端当前那个，只让用户挑库里的项目，
+    /// 再把该项目的图片与标注读成训练数据集。
     /// </summary>
     private async void OnOpenTinyLabel(object? sender, RoutedEventArgs e)
     {
@@ -84,57 +84,25 @@ public partial class TrainView : UserControl
             return;
         }
 
-        string? database = await PickFileAsync(
-            Loc.Get("Train.OpenTinyLabelTip"),
-            [new FilePickerFileType("TinyLabel") { Patterns = ["*.db"] }],
-            Path.GetDirectoryName(viewModel.LastLibraryFile));
+        IReadOnlyList<TinyLabelProjectSummary> projects = await viewModel.ListLibraryProjectsAsync();
 
-        if (database is null)
+        if (projects.Count == 0)
+        {
+            viewModel.Report(Loc.Format("Train.NoProjectsInLibrary", viewModel.LibraryFile));
+            return;
+        }
+
+        TinyLabelProjectSummary? project = await new ProjectPickerDialog(
+                projects, viewModel.LibraryFile, viewModel.LastLibraryProjectId)
+            .ShowDialog<TinyLabelProjectSummary?>(owner);
+
+        if (project is null)
         {
             return;
         }
 
-        while (true)
-        {
-            IReadOnlyList<TinyLabelProjectSummary> projects = await viewModel.ListLibraryProjectsAsync(database);
-
-            if (projects.Count == 0)
-            {
-                viewModel.Report(Loc.Format("Train.NoProjectsInLibrary", database));
-                return;
-            }
-
-            ProjectPickResult? picked = await new ProjectPickerDialog(
-                    projects, database, viewModel.LastLibraryProjectId)
-                .ShowDialog<ProjectPickResult?>(owner);
-
-            if (picked is null)
-            {
-                return;
-            }
-
-            if (picked.IsChangeLibrary)
-            {
-                string? chosen = await PickFileAsync(
-                    Loc.Get("Train.OpenTinyLabelTip"),
-                    [new FilePickerFileType("TinyLabel") { Patterns = ["*.db"] }],
-                    Path.GetDirectoryName(database));
-
-                if (chosen is null)
-                {
-                    continue;
-                }
-
-                database = chosen;
-                continue;
-            }
-
-            TinyLabelProjectSummary project = picked.Project!;
-
-            // 打开项目 = 拉取它的图片清单与标注，顺手记住「库 + 项目」
-            await viewModel.OpenLibraryProjectAsync(database, project.Id, $"{project.Name} · #{project.Id}");
-            return;
-        }
+        // 打开项目 = 拉取它的图片清单与标注，顺手记住这个项目
+        await viewModel.OpenLibraryProjectAsync(project.Id, $"{project.Name} · #{project.Id}");
     }
 
     private async void OnPickOutput(object? sender, RoutedEventArgs e)

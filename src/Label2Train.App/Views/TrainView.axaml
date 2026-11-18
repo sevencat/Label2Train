@@ -5,7 +5,8 @@
              xmlns:l="using:Label2Train.App.Localization"
              xmlns:materialIcons="clr-namespace:Material.Icons.Avalonia;assembly=Material.Icons.Avalonia"
              x:Class="Label2Train.App.Views.TrainView"
-             x:DataType="vm:TrainViewModel">
+             x:DataType="vm:TrainViewModel"
+             IsVisible="{Binding $parent[Window].((vm:MainWindowViewModel)DataContext).IsTrainingMode}">
 
   <UserControl.Styles>
     <Style Selector="Border.card">

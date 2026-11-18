@@ -11,7 +11,9 @@
         Icon="/Assets/app.png"
         Width="1280" Height="840"
         MinWidth="1120" MinHeight="700"
-        WindowStartupLocation="CenterScreen">
+        WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource CanvasBackgroundBrush}"
+        WindowDecorations="BorderOnly">
 
   <Window.Styles>
     <Style Selector="Border.card">
@@ -56,11 +58,68 @@
     <Style Selector="ToggleButton.nav:checked /template/ ContentPresenter">
       <Setter Property="Background" Value="#337C4DFF" />
     </Style>
+    <!-- 自绘标题栏的窗口按钮：贴边、无圆角，悬停变亮，关闭键悬停变红 -->
+    <Style Selector="Button.caption">
+      <Setter Property="Width" Value="46" />
+      <Setter Property="Height" Value="36" />
+      <Setter Property="MinWidth" Value="0" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="BorderThickness" Value="0" />
+      <Setter Property="Background" Value="Transparent" />
+      <Setter Property="Foreground" Value="#E9E9EE" />
+      <Setter Property="HorizontalContentAlignment" Value="Center" />
+      <Setter Property="VerticalContentAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Button.caption:pointerover">
+      <Setter Property="Background" Value="#26FFFFFF" />
+      <Setter Property="Foreground" Value="#FFFFFF" />
+    </Style>
+    <Style Selector="Button.caption:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#26FFFFFF" />
+    </Style>
+    <Style Selector="Button.caption.close:pointerover">
+      <Setter Property="Background" Value="#C42B1C" />
+    </Style>
+    <Style Selector="Button.caption.close:pointerover /template/ ContentPresenter">
+      <Setter Property="Background" Value="#C42B1C" />
+    </Style>
   </Window.Styles>
 
-  <Grid RowDefinitions="Auto,*,Auto" Margin="8" RowSpacing="8">
+  <!-- 根：深色自绘标题栏 + 原有内容（窗口已 ExtendClientArea，标题栏整宽贴边） -->
+  <Grid RowDefinitions="Auto,*">
 
-    <!-- 顶栏 -->
+    <Border Grid.Row="0" Height="36" Background="#1B1B21"
+            PointerPressed="OnTitleBarPressed">
+      <Grid ColumnDefinitions="Auto,*,Auto">
+        <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8"
+                    Margin="12,0,0,0" VerticalAlignment="Center">
+          <Image Source="/Assets/app.png" Width="32" Height="32" />
+          <TextBlock Text="{Binding Title}" FontSize="13" Foreground="#F0F0F2"
+                     VerticalAlignment="Center" />
+        </StackPanel>
+
+        <StackPanel Grid.Column="2" Orientation="Horizontal">
+          <Button Classes="caption" Click="OnMinimizeClick" ToolTip.Tip="{l:Loc Common.Minimize}">
+            <materialIcons:MaterialIcon Kind="WindowMinimize" Width="10" Height="10" />
+          </Button>
+          <Button Classes="caption" Click="OnMaximizeClick" ToolTip.Tip="{l:Loc Common.Maximize}">
+            <Panel>
+              <materialIcons:MaterialIcon x:Name="MaximizeIcon" Kind="WindowMaximize" Width="10" Height="10" />
+              <materialIcons:MaterialIcon x:Name="RestoreIcon" Kind="WindowRestore" Width="10" Height="10"
+                                         IsVisible="False" />
+            </Panel>
+          </Button>
+          <Button Classes="caption close" Click="OnCloseClick" ToolTip.Tip="{l:Loc Common.Close}">
+            <materialIcons:MaterialIcon Kind="Close" Width="12" Height="12" />
+          </Button>
+        </StackPanel>
+      </Grid>
+    </Border>
+
+    <Grid Grid.Row="1" RowDefinitions="Auto,*,Auto" Margin="8" RowSpacing="8">
+
+      <!-- 顶栏 -->
     <Border Grid.Row="0" Classes="card" Padding="12,8">
       <Grid ColumnDefinitions="Auto,Auto,*,Auto,Auto,Auto,Auto" ColumnSpacing="10">
         <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
@@ -102,272 +161,9 @@
       </Grid>
     </Border>
 
-    <!-- 主体（标注页）：左项目 / 右概览 + 图片清单 -->
-    <Grid Grid.Row="1" ColumnDefinitions="290,*" ColumnSpacing="12"
-          IsVisible="{Binding IsAnnotationMode}">
-
-      <!-- 左：项目管理 -->
-      <Grid Grid.Column="0" RowDefinitions="Auto,*,Auto" RowSpacing="8">
-        <Border Grid.Row="0" Classes="card" Padding="12,10">
-          <Grid RowDefinitions="Auto,Auto" RowSpacing="8">
-            <Grid ColumnDefinitions="*,Auto">
-              <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
-                <TextBlock Text="{l:Loc Label.Projects}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" />
-                <Border Classes="badge" Background="#14000000">
-                  <TextBlock Text="{Binding VisibleProjects.Count}" FontSize="12" Opacity="0.7" />
-                </Border>
-              </StackPanel>
-
-              <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="2" VerticalAlignment="Center">
-                <Button Classes="icon" Click="OnCreateProject" ToolTip.Tip="{l:Loc Label.NewProject}">
-                  <materialIcons:MaterialIcon Kind="Plus" Width="18" Height="18" />
-                </Button>
-                <Button Classes="icon" Click="OnRefresh" ToolTip.Tip="{l:Loc Common.Refresh}">
-                  <materialIcons:MaterialIcon Kind="Refresh" Width="18" Height="18" />
-                </Button>
-              </StackPanel>
-            </Grid>
-
-            <!-- 项目可能上千条：搜索收窄 + ListBox 默认虚拟化 -->
-            <TextBox Grid.Row="1" Text="{Binding ProjectFilter, Mode=TwoWay}"
-                     PlaceholderText="{l:Loc Label.ProjectSearch}"
-                     FontSize="13" MinHeight="32" VerticalContentAlignment="Center" />
-          </Grid>
-        </Border>
-
-        <Border Grid.Row="1" Classes="card" Padding="0" ClipToBounds="True">
-          <ListBox Classes="plain" ItemsSource="{Binding VisibleProjects}"
-                   SelectedItem="{Binding SelectedProject, Mode=TwoWay}">
-            <ListBox.ItemTemplate>
-              <DataTemplate x:DataType="vm:ProjectSummaryViewModel">
-                <Grid ColumnDefinitions="*,Auto" RowDefinitions="Auto,Auto" Margin="0,8">
-                  <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <TextBlock Text="{Binding Name}" FontSize="15" FontWeight="SemiBold"
-                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis" MaxWidth="170" />
-                    <Border Classes="badge" Background="#1FF59E0B" IsVisible="{Binding IsClosed}">
-                      <TextBlock Text="{l:Loc Label.Closed}" FontSize="12" Foreground="#D97706" />
-                    </Border>
-                  </StackPanel>
-
-                  <TextBlock Grid.Column="1" Text="{Binding Progress, StringFormat='{}{0:P0}'}"
-                             FontSize="13" Opacity="0.5" VerticalAlignment="Center" />
-
-                  <StackPanel Grid.Row="1" Grid.ColumnSpan="2" Orientation="Horizontal" Spacing="10" Margin="0,3,0,0">
-                    <TextBlock Text="{Binding CreatedLabel}" Classes="caption" />
-                    <TextBlock Text="{Binding ImageCountText}" Classes="caption" />
-                    <TextBlock Text="{Binding LabeledCountText}" Classes="caption" />
-                  </StackPanel>
-                </Grid>
-              </DataTemplate>
-            </ListBox.ItemTemplate>
-          </ListBox>
-        </Border>
-
-        <TextBlock Grid.Row="2" Text="{Binding Status}" FontSize="13" Opacity="0.7"
-                   TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Status}" />
-      </Grid>
-
-      <!-- 右：概览 + 清单 -->
-      <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="8">
-
-        <!-- 概览：项目名 / 进度统计 / 描述 / 动作按钮 -->
-        <Border Grid.Row="0" Classes="card" Padding="14,12" IsVisible="{Binding HasProject}">
-          <Grid RowDefinitions="Auto,Auto,Auto" ColumnDefinitions="Auto,*,Auto"
-                RowSpacing="6" ColumnSpacing="12">
-
-            <TextBlock Grid.Row="0" Grid.Column="0" Text="{Binding ProjectTitle}"
-                       FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"
-                       TextTrimming="CharacterEllipsis" MaxWidth="420" />
-
-            <Grid Grid.Row="0" Grid.Column="1" ColumnDefinitions="160,*" ColumnSpacing="10"
-                  VerticalAlignment="Center">
-              <ProgressBar Grid.Column="0" Height="6" Minimum="0" Maximum="100"
-                           VerticalAlignment="Center" Value="{Binding ProjectProgress}"
-                           ToolTip.Tip="{Binding ProjectStats}" />
-              <TextBlock Grid.Column="1" Text="{Binding ProjectStats}" FontSize="13" Opacity="0.6"
-                         VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
-            </Grid>
-
-            <StackPanel Grid.Row="0" Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-              <Border Classes="badge" Background="#1F16A34A" IsVisible="{Binding !IsProjectClosed}">
-                <TextBlock Text="{l:Loc Label.InProgress}" FontSize="12" Foreground="#16A34A" />
-              </Border>
-              <Border Classes="badge" Background="#14000000" IsVisible="{Binding IsProjectClosed}">
-                <TextBlock Text="{l:Loc Label.Closed}" FontSize="12" Opacity="0.7" />
-              </Border>
-            </StackPanel>
-
-            <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="{Binding ProjectDescription}"
-                       FontSize="13" Opacity="0.7" TextWrapping="Wrap" MaxLines="2"
-                       TextTrimming="CharacterEllipsis" />
-
-            <WrapPanel Grid.Row="2" Grid.ColumnSpan="3" Orientation="Horizontal" ItemSpacing="8" Margin="0,4,0,0">
-              <!-- 标注流程 -->
-              <StackPanel Orientation="Horizontal" Spacing="2">
-                <Button Classes="icon success" Click="OnStartAnnotation" ToolTip.Tip="{l:Loc Label.StartAnnotation}">
-                  <materialIcons:MaterialIcon Kind="Play" Width="18" Height="18" />
-                </Button>
-                <Button Classes="icon warn" Click="OnToggleClosed" IsVisible="{Binding !IsProjectClosed}"
-                        ToolTip.Tip="{l:Loc Label.ToggleClosed}">
-                  <materialIcons:MaterialIcon Kind="Archive" Width="18" Height="18" />
-                </Button>
-                <Button Classes="icon warn" Click="OnToggleClosed" IsVisible="{Binding IsProjectClosed}"
-                        ToolTip.Tip="{l:Loc Label.ToggleClosed}">
-                  <materialIcons:MaterialIcon Kind="Restore" Width="18" Height="18" />
-                </Button>
-              </StackPanel>
-
-              <Border Width="1" Height="20" Background="{DynamicResource PanelBorderBrush}" Margin="2,0" />
-
-              <!-- 项目设置 -->
-              <Button Classes="icon info" Click="OnEditProject" ToolTip.Tip="{l:Loc Label.EditProject}">
-                <materialIcons:MaterialIcon Kind="Pencil" Width="18" Height="18" />
-              </Button>
-
-              <Border Width="1" Height="20" Background="{DynamicResource PanelBorderBrush}" Margin="2,0" />
-
-              <!-- 危险 -->
-              <Button Classes="icon danger" Click="OnDeleteProject" ToolTip.Tip="{l:Loc Label.DeleteProject}">
-                <materialIcons:MaterialIcon Kind="Delete" Width="18" Height="18" />
-              </Button>
-
-              <Border Width="1" Height="20" Background="{DynamicResource PanelBorderBrush}" Margin="2,0" />
-
-              <!-- 图片入库 -->
-              <StackPanel Orientation="Horizontal" Spacing="2">
-                <Button Classes="icon teal" Click="OnImportImages" ToolTip.Tip="{l:Loc Label.ImportImages}">
-                  <materialIcons:MaterialIcon Kind="ImagePlus" Width="18" Height="18" />
-                </Button>
-                <Button Classes="icon teal" Click="OnImportFolder" ToolTip.Tip="{l:Loc Label.ImportFolder}">
-                  <materialIcons:MaterialIcon Kind="FolderPlus" Width="18" Height="18" />
-                </Button>
-                <Button Classes="icon teal" Click="OnScanFolder" ToolTip.Tip="{l:Loc Label.ScanFolder}">
-                  <materialIcons:MaterialIcon Kind="FolderSearch" Width="18" Height="18" />
-                </Button>
-              </StackPanel>
-
-              <Border Width="1" Height="20" Background="{DynamicResource PanelBorderBrush}" Margin="2,0" />
-
-              <!-- 产出 -->
-              <StackPanel Orientation="Horizontal" Spacing="2">
-                <Button Classes="icon violet" Click="OnImportDataset" ToolTip.Tip="{l:Loc Label.ImportDataset}">
-                  <materialIcons:MaterialIcon Kind="DatabaseImport" Width="18" Height="18" />
-                </Button>
-                <Button Classes="icon violet" Click="OnExportDataset" ToolTip.Tip="{l:Loc Label.ExportDataset}">
-                  <materialIcons:MaterialIcon Kind="DatabaseExport" Width="18" Height="18" />
-                </Button>
-                <Button Classes="icon violet" Click="OnOpenProjectFolder" ToolTip.Tip="{l:Loc Label.OpenFolder}">
-                  <materialIcons:MaterialIcon Kind="FolderOpen" Width="18" Height="18" />
-                </Button>
-              </StackPanel>
-
-              <Border Width="1" Height="20" Background="{DynamicResource PanelBorderBrush}" Margin="2,0" />
-
-              <!-- 类别 -->
-              <Button Classes="icon amber" Click="OnManageClasses" ToolTip.Tip="{Binding CategoryText}">
-                <materialIcons:MaterialIcon Kind="Tag" Width="18" Height="18" />
-              </Button>
-            </WrapPanel>
-          </Grid>
-        </Border>
-
-        <!-- 图片清单：表头 / 行 / 分页 -->
-        <Border Grid.Row="1" Classes="card" Padding="0" ClipToBounds="True">
-          <Grid RowDefinitions="Auto,Auto,*,Auto">
-
-            <Grid Grid.Row="0" ColumnDefinitions="44,*,44,44,96,120,*,44" ColumnSpacing="8" Margin="12,8">
-              <TextBlock Grid.Column="0" Text="{l:Loc Label.ColumnThumb}" Classes="caption" />
-              <TextBlock Grid.Column="1" Text="{l:Loc Label.ColumnPath}" Classes="caption" />
-              <TextBlock Grid.Column="2" Text="{l:Loc Label.ColumnLabel}" Classes="caption" HorizontalAlignment="Center" />
-              <TextBlock Grid.Column="3" Text="{l:Loc Label.ColumnSplit}" Classes="caption" HorizontalAlignment="Center" />
-              <TextBlock Grid.Column="4" Text="{l:Loc Label.ColumnAnnotator}" Classes="caption" />
-              <TextBlock Grid.Column="5" Text="{l:Loc Label.ColumnAnnotatedAt}" Classes="caption" />
-              <TextBlock Grid.Column="6" Text="{l:Loc Label.ColumnRemark}" Classes="caption" />
-              <TextBlock Grid.Column="7" Text="{l:Loc Label.ColumnActions}" Classes="caption" HorizontalAlignment="Center" />
-            </Grid>
-
-            <Border Grid.Row="1" Height="1" Background="{DynamicResource PanelBorderBrush}" />
-
-            <ListBox Grid.Row="2" Classes="plain" ItemsSource="{Binding Images}"
-                     SelectedItem="{Binding SelectedImage, Mode=TwoWay}"
-                     DoubleTapped="OnRowDoubleTapped">
-              <ListBox.ItemTemplate>
-                <DataTemplate x:DataType="vm:ProjectImageViewModel">
-                  <Grid ColumnDefinitions="44,*,44,44,96,120,*,44" ColumnSpacing="8" Margin="0,5">
-                    <Border Grid.Column="0" Width="40" Height="40" CornerRadius="3"
-                            Background="#12000000" ClipToBounds="True">
-                      <Image Source="{Binding Thumbnail}" Stretch="UniformToFill" />
-                    </Border>
-
-                    <TextBlock Grid.Column="1" Text="{Binding DisplayPath}" VerticalAlignment="Center"
-                               TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding DisplayPath}" />
-
-                    <TextBlock Grid.Column="2" Text="✓" IsVisible="{Binding HasAnnotation}"
-                               Foreground="#16A34A" FontWeight="Bold"
-                               HorizontalAlignment="Center" VerticalAlignment="Center"
-                               ToolTip.Tip="{l:Loc Label.HasAnnotationTip}" />
-                    <TextBlock Grid.Column="2" Text="—" IsVisible="{Binding !HasAnnotation}"
-                               Opacity="0.35" HorizontalAlignment="Center" VerticalAlignment="Center" />
-
-                    <materialIcons:MaterialIcon Grid.Column="3" Kind="{Binding SplitIcon}"
-                                                Width="21" Height="21" Foreground="{Binding SplitColor}"
-                                                HorizontalAlignment="Center" VerticalAlignment="Center"
-                                                ToolTip.Tip="{Binding SplitTip}" />
-
-                    <TextBlock Grid.Column="4" Text="{Binding AnnotatorText}" FontSize="13" Opacity="0.75"
-                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                               ToolTip.Tip="{Binding AnnotatorText}" />
-
-                    <TextBlock Grid.Column="5" Text="{Binding AnnotatedAtText}" FontSize="13" Opacity="0.55"
-                               VerticalAlignment="Center" />
-
-                    <TextBlock Grid.Column="6" Text="{Binding RemarkText}" FontSize="13" Opacity="0.6"
-                               VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                               ToolTip.Tip="{Binding RemarkText}" />
-
-                    <Button Grid.Column="7" Classes="icon" Tag="{Binding}"
-                            Click="OnImageActionMenu" ToolTip.Tip="{l:Loc Label.RowMenuTip}">
-                      <materialIcons:MaterialIcon Kind="DotsVertical" Width="18" Height="18" />
-                      <Button.Flyout>
-                        <MenuFlyout>
-                          <MenuItem Header="{l:Loc Label.AnnotateAction}" Click="OnAnnotateImageAction" />
-                          <MenuItem Header="{l:Loc Label.ResetState}" Click="OnResetImageState" />
-                          <MenuItem Header="{l:Loc Label.ClearAnnotation}" Click="OnClearAnnotation" />
-                          <MenuItem Header="{l:Loc Label.DeleteImage}" Click="OnDeleteImage" />
-                        </MenuFlyout>
-                      </Button.Flyout>
-                    </Button>
-                  </Grid>
-                </DataTemplate>
-              </ListBox.ItemTemplate>
-            </ListBox>
-
-            <Border Grid.Row="3" BorderThickness="0,1,0,0" BorderBrush="{DynamicResource PanelBorderBrush}">
-              <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="8" Margin="12,8">
-                <Button Grid.Column="0" Classes="icon" Click="OnPrevPage" IsEnabled="{Binding CanPrevPage}"
-                        ToolTip.Tip="{l:Loc Label.PrevPage}">
-                  <materialIcons:MaterialIcon Kind="ChevronLeft" Width="18" Height="18" />
-                </Button>
-                <TextBlock Grid.Column="1" Text="{Binding PageText}" FontSize="13" Opacity="0.7"
-                           VerticalAlignment="Center" />
-                <TextBlock Grid.Column="3" Text="{Binding TotalText}" FontSize="13" Opacity="0.6"
-                           VerticalAlignment="Center" />
-                <Button Grid.Column="2" HorizontalAlignment="Right" Classes="icon"
-                        Click="OnNextPage" IsEnabled="{Binding CanNextPage}"
-                        ToolTip.Tip="{l:Loc Label.NextPage}">
-                  <materialIcons:MaterialIcon Kind="ChevronRight" Width="18" Height="18" />
-                </Button>
-              </Grid>
-            </Border>
-          </Grid>
-        </Border>
-      </Grid>
-    </Grid>
-
-    <!-- 主体（训练页）：从 Annotrain 的训练端整体移植，与标注页互斥显示 -->
-    <Grid Grid.Row="1" IsVisible="{Binding IsTrainingMode}">
-      <views:TrainView DataContext="{Binding Train}" />
-    </Grid>
+    <!-- 主体：标注 / 训练 各是一个独立控件，按模式互斥显示（训练页的可见性由它自己绑） -->
+    <views:AnnotationView x:Name="AnnotationPanel" Grid.Row="1" IsVisible="{Binding IsAnnotationMode}" />
+    <views:TrainView Grid.Row="1" DataContext="{Binding Train}" />
 
     <!-- 底栏：数据库位置 + 软件信息（日志在右上角按钮里） -->
     <Grid Grid.Row="2" ColumnDefinitions="*,Auto" ColumnSpacing="12">
@@ -376,6 +172,7 @@
 
       <TextBlock Grid.Column="1" Text="{Binding ProductInfoText}" FontSize="13" Opacity="0.45"
                  VerticalAlignment="Center" ToolTip.Tip="{Binding ProductInfoText}" />
+    </Grid>
     </Grid>
   </Grid>
 </Window>

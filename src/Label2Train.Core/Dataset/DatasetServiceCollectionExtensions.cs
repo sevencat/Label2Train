@@ -58,6 +58,9 @@ public static class DatasetServiceCollectionExtensions
         services.TryAddSingleton<IDatasetTrainingRunner, SummaryTrainingRunner>();
         services.TryAddSingleton<SimulationPipeline>();
 
+        // 标注端「生成模拟数据」：按 TinyLabel 的库 + 项目目录造一个填满图片与标注的项目
+        services.TryAddSingleton<SyntheticProjectSeeder>();
+
         return services;
     }
 }

@@ -27,13 +27,7 @@ public sealed class AppSettings
     /// </summary>
     public string LastTrainDataDirectory { get; set; } = string.Empty;
 
-    /// <summary>
-    /// 训练端上次用的 TinyLabel 库文件（<c>label2train.db</c> 全路径）。
-    /// 库里的项目就是可训练的数据集，所以要记住「哪个库 + 哪个项目」，下次直接恢复。
-    /// </summary>
-    public string LastTrainLibrary { get; set; } = string.Empty;
-
-    /// <summary>上次在该库里选来训练的项目 Id；0 表示还没记过。</summary>
+    /// <summary>上次在标注库里选来训练的项目 Id；0 表示还没记过（库永远是标注端当前库）。</summary>
     public long LastTrainLibraryProjectId { get; set; }
 
     /// <summary>AI 标注用的 ONNX 模型路径（YOLO 导出）。</summary>

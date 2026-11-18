@@ -5,17 +5,8 @@ using Label2Train.Core.Localization;
 
 namespace Label2Train.App.Views;
 
-/// <summary>选择框的返回值：<see cref="Project"/> 为 <c>null</c> 表示用户要求换一个库。</summary>
-public sealed record ProjectPickResult(TinyLabelProjectSummary? Project)
-{
-    public static ProjectPickResult ChangeLibrary { get; } = new((TinyLabelProjectSummary?)null);
-
-    public bool IsChangeLibrary => Project is null;
-}
-
 /// <summary>
-/// 从 TinyLabel 库里挑一个项目来训练：显示所属库、默认选中上次那个，
-/// 也能就地换成别的库文件。
+/// 从标注库里挑一个项目来训练：库固定是标注端正在用的那个，只能选项目，不能换库。
 /// </summary>
 public partial class ProjectPickerDialog : Window
 {
@@ -35,7 +26,7 @@ public partial class ProjectPickerDialog : Window
 
         _projects = projects;
 
-        LibraryText.Text = Localizer.Instance.Format("Train.LibraryFile", Path.GetFileName(databaseFile));
+        LibraryText.Text = Localizer.Instance.Format("Train.LibraryFile", databaseFile);
 
         ProjectList.ItemsSource = projects
             .Select(project => Localizer.Instance.Format(
@@ -51,13 +42,11 @@ public partial class ProjectPickerDialog : Window
     {
         if (Selected is { } project)
         {
-            Close(new ProjectPickResult(project));
+            Close(project);
         }
     }
 
     private void OnCancel(object? sender, RoutedEventArgs e) => Close(null);
-
-    private void OnChangeLibrary(object? sender, RoutedEventArgs e) => Close(ProjectPickResult.ChangeLibrary);
 
     private TinyLabelProjectSummary? Selected
     {

@@ -22,12 +22,14 @@
 
   <ItemGroup>
     <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Fonts.Inter" />
+    <PackageReference Include="Avalonia.HarfBuzz" />
+    <PackageReference Include="Avalonia.Native" />
+    <PackageReference Include="Avalonia.Skia" />
     <PackageReference Include="Avalonia.Win32" />
     <PackageReference Include="Oxyplot.Avalonia" />
-    <PackageReference Include="Sevencat.ImageFacade.SdcbSimdCodecs" />
+    <PackageReference Include="Sevencat.ImageFacade.SkiaSharp" />
     <PackageReference Include="Sevencat.OnnxSharp" />
-    <PackageReference Include="SimdSkia.Avalonia" />
-    <!-- 窗口平台 + 渲染都用 SimdSkia（它自带 Avalonia.Win32/X11/Native 宿主，别再引 Avalonia.Desktop） -->
     <PackageReference Include="Material.Avalonia" />
     <PackageReference Include="Material.Icons.Avalonia" />
     <PackageReference Include="CommunityToolkit.Mvvm" />
@@ -36,6 +38,17 @@
     <PackageReference Include="Microsoft.Extensions.Logging" />
     <!-- 纯源生成器，不参与运行时：注册代码在编译期生成，别传给下游项目 -->
     <PackageReference Include="Injectio" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 只跑 Windows：这几个包是 SkiaSharp / HarfBuzzSharp 的平台原生资产（传递依赖带进来的），
+         显式引用只为把它 ExcludeAssets 掉，输出目录里不再有 linux / macOS / wasm 的原生库 -->
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" ExcludeAssets="all" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.macOS" ExcludeAssets="all" />
+    <PackageReference Include="HarfBuzzSharp.NativeAssets.WebAssembly" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" ExcludeAssets="all" />
+    <PackageReference Include="SkiaSharp.NativeAssets.WebAssembly" ExcludeAssets="all" />
   </ItemGroup>
 
 </Project>

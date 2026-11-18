@@ -19,11 +19,8 @@
       <ListBox x:Name="ProjectList" DoubleTapped="OnOk" />
     </Border>
 
-    <Grid Grid.Row="3" ColumnDefinitions="Auto,*,Auto">
-      <Button Grid.Column="0" Content="{l:Loc Train.PickLibrary}" Padding="10,2" FontSize="13"
-              Click="OnChangeLibrary" ToolTip.Tip="{l:Loc Train.OpenTinyLabelTip}" />
-
-      <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+    <Grid Grid.Row="3" ColumnDefinitions="*,Auto">
+      <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
         <Button Content="{l:Loc Train.Cancel}" MinWidth="76" Click="OnCancel" />
         <Button Content="{l:Loc Train.Ok}" MinWidth="76" Click="OnOk" IsDefault="True" />
       </StackPanel>
