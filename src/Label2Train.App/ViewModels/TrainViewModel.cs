@@ -38,6 +38,10 @@ public partial class TrainViewModel : ObservableObject
     private readonly TrainingExportService _exporter;
 
     private IDatasetStore? _store;
+
+    /// <summary>当前数据集来自哪个标注项目；0 表示外部目录（没有项目目录可放模型）。</summary>
+    private long _projectId;
+
     private CancellationTokenSource? _training;
     private TrainControl? _control;
 
@@ -389,7 +393,8 @@ public partial class TrainViewModel : ObservableObject
                     ct)
                 .ConfigureAwait(true);
 
-            await ApplyOpenedAsync(opened, $"{project.Name} · #{project.Id}", ct).ConfigureAwait(true);
+            await ApplyOpenedAsync(opened, $"{project.Name} · #{project.Id}", ct, project.Id)
+                .ConfigureAwait(true);
 
             _settings.LastTrainDataDirectory = folder;
             SaveSettings();
@@ -457,7 +462,7 @@ public partial class TrainViewModel : ObservableObject
                     ct)
                 .ConfigureAwait(true);
 
-            await ApplyOpenedAsync(opened, source, ct).ConfigureAwait(true);
+            await ApplyOpenedAsync(opened, source, ct, projectId).ConfigureAwait(true);
 
             _settings.LastTrainLibraryProjectId = projectId;
             _settings.LastTrainDataDirectory = folder;
@@ -522,11 +527,19 @@ public partial class TrainViewModel : ObservableObject
             .ConfigureAwait(true);
     }
 
-    /// <summary>打开成功后统一收尾：换掉旧数据集、算摘要与统计、记类别。</summary>
-    private async Task ApplyOpenedAsync(DatasetOpenResult opened, string source, CancellationToken ct)
+    /// <summary>
+    /// 打开成功后统一收尾：换掉旧数据集、算摘要与统计、记类别。
+    /// <paramref name="projectId"/> 是数据集所属的标注项目（外部目录传 0），导出时据此决定模型落在哪。
+    /// </summary>
+    private async Task ApplyOpenedAsync(
+        DatasetOpenResult opened,
+        string source,
+        CancellationToken ct,
+        long projectId = 0)
     {
         (_store as IDisposable)?.Dispose();
         _store = opened.Store;
+        _projectId = projectId;
 
         DatasetPath = source;
         DatasetSummary = $"{opened.Store.Format.ToDisplayName()} · split {string.Join(" / ", opened.Store.Splits)} · " +
@@ -555,16 +568,37 @@ public partial class TrainViewModel : ObservableObject
     // ── 训练 ──────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// 导出当前训练产物到 <c>{输出目录}/export</c>：<c>best.safetensors</c> + <c>model.json</c>，
-    /// <paramref name="withOnnx"/> 为真时再导出一份 <c>best.onnx</c>；导出的 ONNX 之后直接给「检测」用。
+    /// 导出目的地：训练数据来自标注库里的项目时进 <c>projects/{id}/models</c>（模型跟着项目走），
+    /// 外部目录数据集没有项目目录，退回 <c>{输出目录}/export</c>。
+    /// YOLO / RF-DETR / TinyLabel 产物都走同一个目录，只是文件名由架构决定。
     /// </summary>
-    public async Task ExportAsync(bool withOnnx, CancellationToken ct = default)
+    public string ExportDirectory
+    {
+        get
+        {
+            string? folder = Path.GetDirectoryName(_database.Path);
+
+            if (_projectId > 0 && !string.IsNullOrWhiteSpace(folder))
+            {
+                return TinyLabelWorkspace.ModelDirectory(StorageLocation.FromPath(folder), _projectId);
+            }
+
+            return Path.Combine(OutputDirectory, "export");
+        }
+    }
+
+    /// <summary>
+    /// 导出当前训练产物到 <see cref="ExportDirectory"/>：<c>best.safetensors</c> + <c>model.json</c>，
+    /// <paramref name="withOnnx"/> 为真时再导出一份 <c>best.onnx</c>；导出的 ONNX 之后直接给「检测」用。
+    /// 返回是否成功（训练结束后的自动导出据此决定状态行怎么写）。
+    /// </summary>
+    public async Task<bool> ExportAsync(bool withOnnx, CancellationToken ct = default)
     {
         Status = Loc.Get("Train.Exporting");
 
         try
         {
-            string target = Path.Combine(OutputDirectory, "export");
+            string target = ExportDirectory;
 
             TrainingExportResult result = await Task
                 .Run(() => _exporter.Export(OutputDirectory, target, withOnnx), ct)
@@ -573,6 +607,10 @@ public partial class TrainViewModel : ObservableObject
             if (result.OnnxPath is { } onnx)
             {
                 LastOnnxPath = onnx;
+
+                // 检测与 AI 标注都从这个设置取模型：导出后直接指向新模型，重启也不用再挑文件
+                _settings.AutoLabelModelPath = onnx;
+                SaveSettings();
             }
 
             Status = result.OnnxPath is null
@@ -580,11 +618,32 @@ public partial class TrainViewModel : ObservableObject
                 : Loc.Format("Train.ExportOnnxDone", result.OnnxPath);
 
             AppendLog(Status);
+            return true;
         }
         catch (Exception error)
         {
             _logger.LogError(error, "导出模型失败");
             Status = Loc.Format("Train.ExportFailed", error.Message);
+            AppendLog(Status);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 训练一结束就把模型导到项目目录（含 ONNX），检测/AI 标注立刻能用；
+    /// 摘要 runner 或干跑不写权重时静默跳过。
+    /// </summary>
+    private async Task AutoExportAsync(CancellationToken ct)
+    {
+        if (!File.Exists(Path.Combine(OutputDirectory, TrainingExportService.WeightsFileName)))
+        {
+            _logger.LogInformation("输出目录里没有 {Weights}，跳过自动导出", TrainingExportService.WeightsFileName);
+            return;
+        }
+
+        if (await ExportAsync(withOnnx: true, ct).ConfigureAwait(true))
+        {
+            Status = Loc.Format("Train.AutoExportDone", ExportDirectory);
             AppendLog(Status);
         }
     }
@@ -647,6 +706,9 @@ public partial class TrainViewModel : ObservableObject
             {
                 AppendLog($"  ! {warning}");
             }
+
+            // 训练完自动导出：best.safetensors + model.json + best.onnx 落到项目目录 models/
+            await AutoExportAsync(_training.Token).ConfigureAwait(true);
 
             _settings.LastTrainDataDirectory = Path.GetDirectoryName(DatasetPath) ?? _settings.LastTrainDataDirectory;
             SaveSettings();

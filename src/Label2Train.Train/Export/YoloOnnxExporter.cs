@@ -20,7 +20,8 @@ namespace Label2Train.Train.Export;
 /// </list>
 /// </para>
 /// <para>
-/// 输入高宽在导出时就固定下来（锚点被写成常量），批维保留为动态维 <c>batch</c>。
+/// 输入高宽与批维在导出时都固定成常量（锚点也被写成常量）：批维用符号维 <c>batch</c> 时，
+/// 推理端（OnnxSharp）会把 shape 读成空列表并拒绝加载（<c>must be rank-4 NCHW, got []</c>）。
 /// </para>
 /// </summary>
 public static class YoloOnnxExporter
@@ -66,7 +67,7 @@ public static class YoloOnnxExporter
         }
 
         var builder = new OnnxGraphBuilder(model.Architecture);
-        builder.Input(inputName, OnnxDataType.Float, "batch", 3, imageHeight, imageWidth);
+        builder.Input(inputName, OnnxDataType.Float, 1L, 3L, imageHeight, imageWidth);
 
         var context = new YoloExportContext(builder, model.state_dict());
 
@@ -109,7 +110,7 @@ public static class YoloOnnxExporter
             outputName);
 
         (_, _, _, int anchors) = model.FeatureSizes(imageHeight, imageWidth);
-        builder.Output(outputName, OnnxDataType.Float, "batch", 4 + model.ClassCount, anchors);
+        builder.Output(outputName, OnnxDataType.Float, 1L, 4 + model.ClassCount, anchors);
         return new OnnxModel(builder.Build());
     }
 

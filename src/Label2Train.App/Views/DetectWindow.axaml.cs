@@ -17,14 +17,8 @@ public partial class DetectWindow : Window
         string imageName,
         string modelName) : this()
     {
-        double width = Math.Max(1, image.PixelSize.Width);
-        double height = Math.Max(1, image.PixelSize.Height);
-
-        Board.Width = width;
-        Board.Height = height;
-        Preview.Width = width;
-        Preview.Height = height;
-        Preview.Source = image;
+        Board.Source = image;
+        Board.Candidates = candidates;
 
         var boxes = candidates
             .Select(candidate => new DetectedBox(
@@ -36,7 +30,6 @@ public partial class DetectWindow : Window
                 candidate.ScoreText))
             .ToList();
 
-        Boxes.ItemsSource = boxes;
         BoxList.ItemsSource = boxes;
 
         HeaderText.Text = $"{imageName} · {modelName} · {boxes.Count} 个框";

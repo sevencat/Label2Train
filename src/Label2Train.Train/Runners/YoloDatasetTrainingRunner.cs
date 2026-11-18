@@ -28,6 +28,12 @@ public sealed class YoloDatasetTrainingRunner(
     BlobStoreRegistry registry,
     ILogger<YoloDatasetTrainingRunner>? logger = null) : IDatasetTrainingRunner
 {
+    /// <summary>处理器个数上限：批内并行解码的线程数，别让 8 张图占满 32 个核。</summary>
+    private static readonly int Parallelism = Math.Max(1, Math.Min(Environment.ProcessorCount, 8));
+
+    /// <summary>blob 存储未必线程安全，取流仍串行。</summary>
+    private readonly object _storeGate = new();
+
     /// <inheritdoc />
     public async Task<TrainingRunSummary> TrainAsync(
         IDatasetStore store,
@@ -136,15 +142,20 @@ public sealed class YoloDatasetTrainingRunner(
                 schedule,
                 metrics =>
                 {
+                    var evalWatch = System.Diagnostics.Stopwatch.StartNew();
                     (float map50, float map95) = EvaluateMap(
                         model, validationSamples, validationLoader, options, classCount, device, ct);
+                    evalWatch.Stop();
 
                     lastMap50 = map50;
                     lastMap95 = map95;
 
+                    // 把一轮拆成「等数据 / 算梯度 / 评估」三段：GPU 慢还是数据管道慢，看这一行就够了。
                     Log(options,
                         $"epoch {metrics.Epoch + 1}/{options.Epochs}  loss {metrics.Loss:F4}  "
-                        + $"mAP50 {map50:F3}  mAP50-95 {map95:F3}");
+                        + $"mAP50 {map50:F3}  mAP50-95 {map95:F3}  "
+                        + $"time data {trainer.LastDataSeconds:F1}s + step {trainer.LastComputeSeconds:F1}s "
+                        + $"+ eval {evalWatch.Elapsed.TotalSeconds:F1}s");
 
                     options.Progress?.Report(new TrainingProgress(
                         metrics.Epoch, options.Epochs, metrics.Step, metrics.Loss, metrics.LearningRate, map50, map95));
@@ -212,29 +223,54 @@ public sealed class YoloDatasetTrainingRunner(
             var rng = new Rng((ulong)(0x51ED270B + epoch * 7919));
             int[] order = Shuffle(Enumerable.Range(0, trainSamples.Count).ToArray(), rng);
 
-            for (int start = 0; start < order.Length; start += options.BatchSize)
+            Batch? previous = null;
+            try
             {
-                int count = Math.Min(options.BatchSize, order.Length - start);
-                var images = new List<YoloImageSample>(count);
-
-                for (int offset = 0; offset < count; offset++)
+                for (int start = 0; start < order.Length; start += options.BatchSize)
                 {
-                    DatasetSample sample = trainSamples[order[start + offset]];
-                    using Stream stream = OpenImage(sample);
-                    images.Add(trainLoader.Load(stream, sample.Image.RelativePath, ToLabels(sample), rng));
+                    int count = Math.Min(options.BatchSize, order.Length - start);
+                    var images = new YoloImageSample[count];
+
+                    // 解码 + letterbox + 增强是纯 CPU 的，一批 8 张串行要 0.6-0.9 s，而 GPU 一步才 ~0.1 s：
+                    // 不铺开的话数据准备就是整条流水线的瓶颈。各张图互不依赖，按批并行即可；
+                    // blob 存储的访问留在锁里（存储未必线程安全）。
+                    Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = Parallelism }, offset =>
+                    {
+                        DatasetSample sample = trainSamples[order[start + offset]];
+                        Stream stream;
+                        lock (_storeGate)
+                            stream = OpenImage(sample);
+
+                        using (stream)
+                        {
+                            images[offset] = trainLoader.Load(
+                                stream,
+                                sample.Image.RelativePath,
+                                ToLabels(sample),
+                                new Rng((ulong)((epoch * 7919L) + start + offset)));
+                        }
+                    });
+
+                    YoloBatchResult packed = YoloBatchBuilder.Build(images);
+
+                    // 上一批已训练完（backward 结束），先把它的显存还回去再准备下一批。
+                    previous?.Dispose();
+                    previous = new Batch(
+                        TorchInterop.FromArray(
+                            packed.Inputs,
+                            [packed.BatchSize, packed.Channels, packed.Height, packed.Width],
+                            device),
+                        TorchInterop.FromArray(
+                            packed.Targets,
+                            [packed.BatchSize, packed.MaxBoxes, YoloBatchBuilder.TargetColumns],
+                            device));
+
+                    yield return previous;
                 }
-
-                YoloBatchResult packed = YoloBatchBuilder.Build(images);
-
-                yield return new Batch(
-                    TorchInterop.FromArray(
-                        packed.Inputs,
-                        [packed.BatchSize, packed.Channels, packed.Height, packed.Width],
-                        device),
-                    TorchInterop.FromArray(
-                        packed.Targets,
-                        [packed.BatchSize, packed.MaxBoxes, YoloBatchBuilder.TargetColumns],
-                        device));
+            }
+            finally
+            {
+                previous?.Dispose();
             }
         }
 
@@ -336,29 +372,35 @@ public sealed class YoloDatasetTrainingRunner(
                 {
                     ct.ThrowIfCancellationRequested();
 
-                    YoloImageSample image;
-                    using (Stream stream = OpenImage(sample))
+                    // 单张前向的激活也是几百 MB：验证集一大，不逐张释放就会把显存撑爆。
+                    using (var scope = torch.NewDisposeScope())
                     {
-                        image = validationLoader.Load(stream, sample.Image.RelativePath, ToLabels(sample));
+                        YoloImageSample image;
+                        using (Stream stream = OpenImage(sample))
+                        {
+                            image = validationLoader.Load(stream, sample.Image.RelativePath, ToLabels(sample));
+                        }
+
+                        Tensor input = TorchInterop.FromArray(
+                            image.ToChw(),
+                            [1, 3, options.ImageSize, options.ImageSize],
+                            device);
+
+                        predictions.Add(YoloPredictionDecoder.Decode(
+                            model.forward(input),
+                            options.ImageSize,
+                            options.ImageSize,
+                            classCount,
+                            DetectHeadModule.DefaultRegressionMax,
+                            confidenceThreshold: 0.001f,
+                            iouThreshold: 0.7f));
+
+                        groundTruths.Add(image.Boxes
+                            .Select(box => new YoloGroundTruth(box.ClassId, box.X1, box.Y1, box.X2, box.Y2))
+                            .ToArray());
+
+                        scope.Dispose();
                     }
-
-                    Tensor input = TorchInterop.FromArray(
-                        image.ToChw(),
-                        [1, 3, options.ImageSize, options.ImageSize],
-                        device);
-
-                    predictions.Add(YoloPredictionDecoder.Decode(
-                        model.forward(input),
-                        options.ImageSize,
-                        options.ImageSize,
-                        classCount,
-                        DetectHeadModule.DefaultRegressionMax,
-                        confidenceThreshold: 0.001f,
-                        iouThreshold: 0.7f));
-
-                    groundTruths.Add(image.Boxes
-                        .Select(box => new YoloGroundTruth(box.ClassId, box.X1, box.Y1, box.X2, box.Y2))
-                        .ToArray());
                 }
             }
         }

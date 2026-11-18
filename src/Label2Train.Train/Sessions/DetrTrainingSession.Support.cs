@@ -85,18 +85,24 @@ public sealed partial class DetrTrainingSession
         {
             foreach (YoloSample sample in samples)
             {
-                YoloImageSample image = validationLoader.Load(sample);
-                Tensor input = TorchInterop.FromArray(
-                    image.ToChw(),
-                    new long[] { 1, 3, options.ImageSize, options.ImageSize },
-                    device);
+                // 单张前向的激活也是几百 MB：验证集一大，不逐张释放就会把显存撑爆。
+                using (var scope = torch.NewDisposeScope())
+                {
+                    YoloImageSample image = validationLoader.Load(sample);
+                    Tensor input = TorchInterop.FromArray(
+                        image.ToChw(),
+                        new long[] { 1, 3, options.ImageSize, options.ImageSize },
+                        device);
 
-                predictions.Add(DetrPostProcess.Decode(
-                    model.forward(input), options.ImageSize, options.ImageSize, classCount, options.Confidence)[0]);
+                    predictions.Add(DetrPostProcess.Decode(
+                        model.forward(input), options.ImageSize, options.ImageSize, classCount, options.Confidence)[0]);
 
-                groundTruths.Add(image.Boxes
-                    .Select(box => new YoloGroundTruth(box.ClassId, box.X1, box.Y1, box.X2, box.Y2))
-                    .ToArray());
+                    groundTruths.Add(image.Boxes
+                        .Select(box => new YoloGroundTruth(box.ClassId, box.X1, box.Y1, box.X2, box.Y2))
+                        .ToArray());
+
+                    scope.Dispose();
+                }
             }
         }
 

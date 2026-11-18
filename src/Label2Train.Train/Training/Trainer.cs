@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Label2Train.Train.Core;
 using TorchSharp;
 using TorchSharp.Modules;
@@ -91,6 +92,12 @@ public sealed class Trainer
     /// <summary>最近一个 epoch 的平均损失。</summary>
     public float LastLoss { get; private set; } = float.NaN;
 
+    /// <summary>最近一个 epoch 里「等批次数据（解码 / letterbox / 增强 + 上传）」花掉的秒数。</summary>
+    public double LastDataSeconds { get; private set; }
+
+    /// <summary>最近一个 epoch 里「前向 + 损失 + 反向 + 优化器」花掉的秒数。</summary>
+    public double LastComputeSeconds { get; private set; }
+
     /// <summary>
     /// 训练多个 epoch，返回每个 epoch 的指标。
     /// <para>批次集合固定；<see cref="TrainerOptions.Shuffle"/> 决定每个 epoch 是否重排。</para>
@@ -146,37 +153,72 @@ public sealed class Trainer
         {
             _model.train();
 
+            var dataWatch = new Stopwatch();
+            var stepWatch = new Stopwatch();
+            double dataSeconds = 0;
+            double computeSeconds = 0;
             double epochLoss = 0;
             int batchCount = 0;
 
-            foreach (Batch batch in batchesForEpoch(epoch))
+            // AdamW 的 exp_avg / exp_avg_sq 在第一次 step 里创建，必须活在 DisposeScope 之外。
+            // 从检查点继续训练时 optimizer 已有 state（Step > 0），可以直接进 scope 分支。
+            bool optimizerStateReady = Step > 0;
+
+            try
             {
-                ArgumentNullException.ThrowIfNull(batch);
+                using IEnumerator<Batch> iterator = batchesForEpoch(epoch).GetEnumerator();
 
-                // 暂停/取消只在批次边界生效：不打断已开始的 forward/backward，
-                // 参数与优化器状态始终停在一致的位置，继续时无需重新加载任何东西。
-                if (control is not null && !control.WaitUntilReady())
+                while (true)
                 {
-                    stopped = true;
-                    break;
+                    // MoveNext 就是「准备下一批」：解码图片、letterbox、增强、拷到设备。
+                    // 它和下面的前向反向在同一线程里，所以这段时间 GPU 是闲着的。
+                    dataWatch.Restart();
+                    if (!iterator.MoveNext())
+                        break;
+                    dataSeconds += dataWatch.Elapsed.TotalSeconds;
+
+                    Batch batch = iterator.Current;
+                    ArgumentNullException.ThrowIfNull(batch);
+
+                    // 暂停/取消只在批次边界生效：不打断已开始的 forward/backward，
+                    // 参数与优化器状态始终停在一致的位置，继续时无需重新加载任何东西。
+                    if (control is not null && !control.WaitUntilReady())
+                    {
+                        stopped = true;
+                        break;
+                    }
+
+                    stepWatch.Restart();
+
+                    // 一个 step 的前向激活是 GB 级的，不主动释放就要等 GC——而 GPU 显存不够时
+                    // Windows 会把显存分页到系统内存，训练从 100 ms/step 掉到 3-4 s/step，
+                    // 表现就是「上了 CUDA 还是很慢」。所以整步挂在一个 DisposeScope 上。
+                    if (!optimizerStateReady)
+                    {
+                        epochLoss += RunStep(batch, schedule);
+                        optimizerStateReady = true;
+
+                        // 首步没有 scope，激活只能靠 GC；主动收一次，别让这几 GB 常驻。
+                        GC.Collect();
+                        GC.WaitForPendingFinalizers();
+                    }
+                    else
+                    {
+                        using (var scope = torch.NewDisposeScope())
+                        {
+                            epochLoss += RunStep(batch, schedule);
+                            scope.Dispose();
+                        }
+                    }
+
+                    batchCount++;
+                    computeSeconds += stepWatch.Elapsed.TotalSeconds;
                 }
-
-                _optimizer.zero_grad();
-                Tensor prediction = _model.forward(batch.Input);
-                Tensor loss = ComputeLoss(prediction, batch.Target);
-                loss.backward();
-
-                ClipGradients();
-
-                if (schedule is not null)
-                    SetLearningRate(schedule.GetLearningRate(Step));
-
-                _optimizer.step();
-                _ema?.Update(_model);
-                Step++;
-
-                epochLoss += loss.detach().item<float>();
-                batchCount++;
+            }
+            finally
+            {
+                LastDataSeconds = dataSeconds;
+                LastComputeSeconds = computeSeconds;
             }
 
             if (batchCount == 0)
@@ -213,8 +255,13 @@ public sealed class Trainer
         {
             foreach (Batch batch in batches)
             {
-                Tensor prediction = _model.forward(batch.Input);
-                total += ComputeLoss(prediction, batch.Target).item<float>();
+                // 评估也是每批几 GB 的激活，同样要按批释放，否则验证集一大就爆显存。
+                using (var scope = torch.NewDisposeScope())
+                {
+                    Tensor prediction = _model.forward(batch.Input);
+                    total += ComputeLoss(prediction, batch.Target).item<float>();
+                    scope.Dispose();
+                }
             }
         }
 
@@ -222,22 +269,53 @@ public sealed class Trainer
         return (float)(total / batches.Count);
     }
 
+    /// <summary>执行一个训练步：前向 / 损失 / 反向 / 梯度裁剪 / 优化器 / EMA，返回该步损失。</summary>
+    private float RunStep(Batch batch, ILearningRateSchedule? schedule)
+    {
+        _optimizer.zero_grad();
+        Tensor prediction = _model.forward(batch.Input);
+        Tensor loss = ComputeLoss(prediction, batch.Target);
+        loss.backward();
+
+        ClipGradients();
+
+        if (schedule is not null)
+            SetLearningRate(schedule.GetLearningRate(Step));
+
+        _optimizer.step();
+        _ema?.Update(_model);
+        Step++;
+
+        return loss.detach().item<float>();
+    }
+
     private void ClipGradients()
     {
         if (_options.GradientClipNorm <= 0f)
             return;
 
-        double sumSquares = 0;
+        // 平方和在设备上累加，最后只同步一次。
+        // 逐参数 item<T>() 会让每个参数都触发一次 GPU→CPU 同步（YOLOv8n 有上百个参数张量），
+        // 等于每个 step 上百次「等 GPU 跑完再继续」，这是 GPU 训练最典型的自我拖慢。
+        Tensor? sum = null;
         foreach (Parameter parameter in _model.parameters())
         {
             if (parameter.grad is null)
                 continue;
 
-            // item<T>() 要求类型与张量一致：F32 张量只能读 float。
-            sumSquares += parameter.grad.pow(2).sum().item<float>();
+            Tensor squares = parameter.grad.detach().pow(2).sum();
+            sum = sum is null ? squares : sum + squares;
         }
 
-        double norm = Math.Sqrt(sumSquares);
+        if (sum is null)
+            return;
+
+        double norm;
+        using (sum)
+        {
+            norm = Math.Sqrt(sum.item<float>());
+        }
+
         if (norm <= _options.GradientClipNorm || norm <= 0)
             return;
 

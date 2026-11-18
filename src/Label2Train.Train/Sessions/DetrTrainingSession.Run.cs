@@ -122,25 +122,42 @@ public sealed partial class DetrTrainingSession
         {
             IReadOnlyList<YoloSample> samples = trainSet.Samples;
 
-            for (int start = 0; start < samples.Count; start += options.BatchSize)
+            Batch? previous = null;
+            try
             {
-                int count = Math.Min(options.BatchSize, samples.Count - start);
-                var images = new List<YoloImageSample>(count);
+                for (int start = 0; start < samples.Count; start += options.BatchSize)
+                {
+                    int count = Math.Min(options.BatchSize, samples.Count - start);
+                    var images = new YoloImageSample[count];
 
-                for (int offset = 0; offset < count; offset++)
-                    images.Add(trainLoader.Load(samples[start + offset]));
+                    // 一批图串行解码 + letterbox + 增强要几百毫秒，GPU 一步才 ~0.1 s，
+                    // 数据准备会拖住整条流水线；各张图互不依赖，按批并行。
+                    Parallel.For(
+                        0,
+                        count,
+                        new ParallelOptions { MaxDegreeOfParallelism = Math.Min(count, 8) },
+                        offset => images[offset] = trainLoader.Load(samples[start + offset]));
 
-                YoloBatchResult packed = YoloBatchBuilder.Build(images);
+                    YoloBatchResult packed = YoloBatchBuilder.Build(images);
 
-                yield return new Batch(
-                    TorchInterop.FromArray(
-                        packed.Inputs,
-                        new long[] { packed.BatchSize, packed.Channels, packed.Height, packed.Width },
-                        device),
-                    TorchInterop.FromArray(
-                        packed.Targets,
-                        new long[] { packed.BatchSize, packed.MaxBoxes, YoloBatchBuilder.TargetColumns },
-                        device));
+                    // 上一批已训练完（backward 结束），先把它的显存还回去再准备下一批。
+                    previous?.Dispose();
+                    previous = new Batch(
+                        TorchInterop.FromArray(
+                            packed.Inputs,
+                            new long[] { packed.BatchSize, packed.Channels, packed.Height, packed.Width },
+                            device),
+                        TorchInterop.FromArray(
+                            packed.Targets,
+                            new long[] { packed.BatchSize, packed.MaxBoxes, YoloBatchBuilder.TargetColumns },
+                            device));
+
+                    yield return previous;
+                }
+            }
+            finally
+            {
+                previous?.Dispose();
             }
         }
     }

@@ -23,6 +23,9 @@ public static class TinyLabelWorkspace
     /// <summary>项目内缩略图的子目录名：<c>projects/{id}/thumbs/</c>（结构与原图镜像，扩展名统一 jpg）。</summary>
     public const string ThumbsFolderName = "thumbs";
 
+    /// <summary>项目内模型目录的文件夹名：<c>projects/{id}/models/</c>（训练导出的模型落这里）。</summary>
+    public const string ModelsFolderName = "models";
+
     /// <summary>
     /// 项目目录的相对前缀 <c>projects/{id}</c>：入库的 <c>RelPath</c> / 写盘用的 key 都从它开始，
     /// 别在别处再拼一遍字符串。
@@ -53,6 +56,14 @@ public static class TinyLabelWorkspace
     /// <summary>项目缩略图目录的绝对路径：<c>数据目录/projects/{id}/thumbs</c>。</summary>
     public static string ThumbDirectory(StorageLocation root, long projectId)
         => Path.Combine(ProjectDirectory(root, projectId), ThumbsFolderName);
+
+    /// <summary>
+    /// 项目模型目录的绝对路径：<c>数据目录/projects/{id}/models</c>。
+    /// 训练结束后导出的 <c>best.safetensors</c> / <c>model.json</c> / <c>best.onnx</c> 落这里，
+    /// 模型跟着项目一起走，换机器拷项目目录也能继续检测。
+    /// </summary>
+    public static string ModelDirectory(StorageLocation root, long projectId)
+        => Path.Combine(ProjectDirectory(root, projectId), ModelsFolderName);
 
     /// <summary>
     /// 建项目目录（已存在则跳过），返回绝对路径；新建项目时顺手调用。

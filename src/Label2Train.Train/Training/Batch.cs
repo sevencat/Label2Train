@@ -4,8 +4,22 @@ using static TorchSharp.torch.nn;
 
 namespace Label2Train.Train.Training;
 
-/// <summary>一个训练批次（TorchSharp 张量，形状由模型/损失决定）。</summary>
-public sealed record Batch(Tensor Input, Tensor Target);
+/// <summary>
+/// 一个训练批次（TorchSharp 张量，形状由模型/损失决定）。
+/// <para>
+/// 一批 640×640×3×8 的输入就是几十 MB 显存，生产批次的代码（<c>BatchesForEpoch</c> 之类）
+/// 在下一次 <c>yield</c> 前会 <see cref="Dispose"/> 上一批；不释放的话显存会随步数线性增长。
+/// </para>
+/// </summary>
+public sealed record Batch(Tensor Input, Tensor Target) : IDisposable
+{
+    /// <inheritdoc />
+    public void Dispose()
+    {
+        Input.Dispose();
+        Target.Dispose();
+    }
+}
 
 /// <summary>损失函数：给定预测与目标，返回可反向的标量张量。</summary>
 public interface ILoss

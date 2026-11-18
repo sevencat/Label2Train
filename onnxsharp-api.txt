@@ -1,0 +1,1583 @@
+== OnnxSharp.Core.Arg
+   Constructor Void .ctor(Int32)
+   Method Boolean Equals(OnnxSharp.Core.Arg)
+   Method Boolean Equals(System.Object)
+   Method Int32 get_Idx()
+   Method Boolean get_IsEmpty()
+   Method Int32 GetHashCode()
+   Property Int32 Idx
+   Property Boolean IsEmpty
+   Method Boolean op_Equality(OnnxSharp.Core.Arg, OnnxSharp.Core.Arg)
+   Method Boolean op_Inequality(OnnxSharp.Core.Arg, OnnxSharp.Core.Arg)
+   Method System.String ToString()
+== OnnxSharp.Core.ArgData
+   Constructor Void .ctor()
+   Field Int32 BufferIndex
+   Field OnnxSharp.Tensors.Tensor Const
+   Field OnnxSharp.Tensors.DType DType
+   Field Boolean HasShape
+   Field OnnxSharp.Core.ArgKind Kind
+   Field OnnxSharp.Tensors.Layout Layout
+   Field System.String Name
+   Field OnnxSharp.Tensors.Tensor Runtime
+   Field OnnxSharp.Tensors.TensorShape Shape
+   Method System.String ToString()
+== OnnxSharp.Core.ArgKind
+   Field OnnxSharp.Core.ArgKind Const
+   Field OnnxSharp.Core.ArgKind Empty
+   Field OnnxSharp.Core.ArgKind Input
+   Field OnnxSharp.Core.ArgKind Output
+   Field OnnxSharp.Core.ArgKind Temp
+   Field Int32 value__
+== OnnxSharp.Core.DictValue
+   Method Double AsFloat(Int32)
+   Method Double[] AsFloats()
+   Method Int64 AsInt(Int32)
+   Method Int64[] AsInts()
+   Method System.String AsString(Int32)
+   Property Int32 Count
+   Method OnnxSharp.Core.DictValue FromFloat(Double)
+   Method OnnxSharp.Core.DictValue FromFloats(Double[])
+   Method OnnxSharp.Core.DictValue FromInt(Int64)
+   Method OnnxSharp.Core.DictValue FromInts(Int64[])
+   Method OnnxSharp.Core.DictValue FromString(System.String)
+   Method OnnxSharp.Core.DictValue FromStrings(System.String[])
+   Method OnnxSharp.Core.DictValue FromTensor(OnnxSharp.Tensors.Tensor)
+   Method Int32 get_Count()
+   Method OnnxSharp.Core.DictValueKind get_Kind()
+   Method OnnxSharp.Tensors.Tensor get_Tensor()
+   Property OnnxSharp.Core.DictValueKind Kind
+   Property OnnxSharp.Tensors.Tensor Tensor
+   Method System.String ToString()
+== OnnxSharp.Core.DictValueKind
+   Field OnnxSharp.Core.DictValueKind Float
+   Field OnnxSharp.Core.DictValueKind Floats
+   Field OnnxSharp.Core.DictValueKind Int
+   Field OnnxSharp.Core.DictValueKind Ints
+   Field OnnxSharp.Core.DictValueKind None
+   Field OnnxSharp.Core.DictValueKind String
+   Field OnnxSharp.Core.DictValueKind Strings
+   Field OnnxSharp.Core.DictValueKind Tensor
+   Field Int32 value__
+== OnnxSharp.Core.Graph
+   Constructor Void .ctor(System.String, System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.Arg])
+   Method Void Append(OnnxSharp.Core.LayerInfo)
+   Method Boolean DropInput(OnnxSharp.Core.Arg)
+   Method System.Collections.Generic.List`1[OnnxSharp.Core.Arg] get_Inputs()
+   Method System.String get_Name()
+   Method System.Collections.Generic.List`1[OnnxSharp.Core.Arg] get_Outputs()
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.LayerInfo] get_Prog()
+   Method Int32 get_Version()
+   Property System.Collections.Generic.List`1[OnnxSharp.Core.Arg] Inputs
+   Property System.String Name
+   Property System.Collections.Generic.List`1[OnnxSharp.Core.Arg] Outputs
+   Property System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.LayerInfo] Prog
+   Method Int32 RemoveAll(System.Predicate`1[OnnxSharp.Core.LayerInfo])
+   Method Void Reset(System.Collections.Generic.IEnumerable`1[OnnxSharp.Core.LayerInfo])
+   Method Void SetOutputs(System.Collections.Generic.IEnumerable`1[OnnxSharp.Core.Arg])
+   Method System.String ToString()
+   Property Int32 Version
+== OnnxSharp.Core.Layer
+   Constructor Void .ctor()
+   Method Void Finalize(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor], System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor])
+   Field Boolean FinalizedOnce
+   Method Void Forward(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor], System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor], System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor])
+   Field System.Collections.Generic.List`1[OnnxSharp.Tensors.TensorShape] LastInShapes
+   Field System.Collections.Generic.List`1[OnnxSharp.Tensors.DType] LastInTypes
+   Method Void PrepackWeights()
+== OnnxSharp.Core.LayerInfo
+   Constructor Void .ctor()
+   Field System.Collections.Generic.List`1[OnnxSharp.Tensors.Tensor] Blobs
+   Method Boolean DynamicOutputShapes()
+   Method Int32 get_InPlaceInput()
+   Method Int32 get_InputCount()
+   Method OnnxSharp.Core.NetImpl get_Net()
+   Method OnnxSharp.Core.LayerParams get_Parameters()
+   Method Void GetLayouts(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Layout], System.Collections.Generic.List`1[OnnxSharp.Tensors.Layout])
+   Method Void GetMemoryShapes(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.TensorShape], Int32, System.Collections.Generic.List`1[OnnxSharp.Tensors.TensorShape], System.Collections.Generic.List`1[OnnxSharp.Tensors.TensorShape])
+   Method Void GetTypes(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.DType], Int32, Int32, System.Collections.Generic.List`1[OnnxSharp.Tensors.DType], System.Collections.Generic.List`1[OnnxSharp.Tensors.DType])
+   Method OnnxSharp.Tensors.Tensor In(Int32)
+   Property Int32 InPlaceInput
+   Property Int32 InputCount
+   Field System.Collections.Generic.List`1[OnnxSharp.Core.Arg] Inputs
+   Method Boolean IsConstInput(Int32)
+   Field System.String Name
+   Property OnnxSharp.Core.NetImpl Net
+   Field System.Collections.Generic.List`1[OnnxSharp.Core.Arg] Outputs
+   Property OnnxSharp.Core.LayerParams Parameters
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.Graph] Subgraphs()
+   Method System.String ToString()
+   Field System.String Type
+== OnnxSharp.Core.LayerParams
+   Constructor Void .ctor()
+   Method OnnxSharp.Core.DictValue Get(System.String)
+   Method System.String get_Name()
+   Method System.String get_Type()
+   Method System.Collections.Generic.IReadOnlyDictionary`2[System.String,OnnxSharp.Core.DictValue] get_Values()
+   Method Double GetFloat(System.String, Double)
+   Method Double[] GetFloats(System.String)
+   Method Int64 GetInt(System.String, Int64)
+   Method Int64[] GetInts(System.String)
+   Method System.String GetString(System.String, System.String)
+   Method Boolean Has(System.String)
+   Property System.String Name
+   Method Void Set(System.String, OnnxSharp.Core.DictValue)
+   Method Void Set(System.String, Int64)
+   Method Void Set(System.String, Double)
+   Method Void Set(System.String, System.String)
+   Method Void Set(System.String, Int64[])
+   Method Void Set(System.String, System.String[])
+   Method Void Set(System.String, Int32[])
+   Method Void Set(System.String, Single[])
+   Method Void Set(System.String, OnnxSharp.Tensors.Tensor)
+   Method Void set_Name(System.String)
+   Method Void set_Type(System.String)
+   Method System.String ToString()
+   Method OnnxSharp.Core.DictValue TryGet(System.String)
+   Property System.String Type
+   Property System.Collections.Generic.IReadOnlyDictionary`2[System.String,OnnxSharp.Core.DictValue] Values
+== OnnxSharp.Core.LayerRegistry
+   Method OnnxSharp.Core.LayerInfo Create(System.String, OnnxSharp.Core.LayerParams)
+   Method Void EnsureBuiltins()
+   Method Boolean IsRegistered(System.String)
+   Method Void Register(System.String, System.Func`2[OnnxSharp.Core.LayerParams,OnnxSharp.Core.LayerInfo])
+== OnnxSharp.Core.Net
+   Constructor Void .ctor()
+   Method OnnxSharp.Tensors.Tensor Forward()
+   Method OnnxSharp.Tensors.Tensor Forward(System.String)
+   Method System.Collections.Generic.List`1[OnnxSharp.Tensors.Tensor] ForwardAll()
+   Method System.Collections.Generic.List`1[OnnxSharp.Tensors.Tensor] ForwardAll(Boolean)
+   Method OnnxSharp.Core.NetImpl get_Impl()
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] get_InputNames()
+   Method OnnxSharp.Core.Graph get_MainGraph()
+   Method System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.String] get_Metadata()
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] get_OutputNames()
+   Property OnnxSharp.Core.NetImpl Impl
+   Property System.Collections.Generic.IReadOnlyList`1[System.String] InputNames
+   Property OnnxSharp.Core.Graph MainGraph
+   Property System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.String] Metadata
+   Property System.Collections.Generic.IReadOnlyList`1[System.String] OutputNames
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.OpTiming] ProfileAll(Int32, Int32, Boolean, System.Action)
+   Method OnnxSharp.Core.Net ReadModel(System.String)
+   Method OnnxSharp.Core.Net ReadModel(System.String, System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.Int32[]])
+   Method OnnxSharp.Core.Net ReadModel(System.String, System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.Int32[]], System.Collections.Generic.IReadOnlyDictionary`2[System.String,OnnxSharp.Tensors.Tensor])
+   Method OnnxSharp.Core.Net ReadModel(System.String, Int32[])
+   Method OnnxSharp.Core.Net ReadModel(System.ReadOnlyMemory`1[System.Byte], System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.Int32[]], System.String)
+   Method OnnxSharp.Core.Net ReadModel(System.ReadOnlyMemory`1[System.Byte], Int32[], System.String)
+   Method Void SetInput(System.String, OnnxSharp.Tensors.Tensor)
+== OnnxSharp.Core.NetImpl
+   Constructor Void .ctor()
+   Property Int32 ArgCount
+   Method OnnxSharp.Tensors.Tensor BindArgTensor(OnnxSharp.Core.Arg, OnnxSharp.Tensors.TensorShape, OnnxSharp.Tensors.DType)
+   Method OnnxSharp.Core.Arg Declare(System.String, OnnxSharp.Core.ArgKind)
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor] FitTemps(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.TensorShape], System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.DType])
+   Method OnnxSharp.Tensors.Tensor Forward()
+   Method OnnxSharp.Tensors.Tensor Forward(System.String)
+   Method System.Collections.Generic.List`1[OnnxSharp.Tensors.Tensor] ForwardAll()
+   Method System.Collections.Generic.List`1[OnnxSharp.Tensors.Tensor] ForwardAll(Boolean)
+   Method Int32 get_ArgCount()
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.Graph] get_Graphs()
+   Method OnnxSharp.Core.Graph get_MainGraph()
+   Method Int32 get_SlotCount()
+   Method Int32 get_TempCount()
+   Method OnnxSharp.Core.Arg GetArg(System.String)
+   Method OnnxSharp.Core.ArgData GetArgData(OnnxSharp.Core.Arg)
+   Method OnnxSharp.Core.ArgKind GetArgKind(OnnxSharp.Core.Arg)
+   Method System.String GetArgName(OnnxSharp.Core.Arg)
+   Method OnnxSharp.Tensors.Tensor GetArgTensor(OnnxSharp.Core.Arg)
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] GetInputNames()
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] GetOutputNames()
+   Property System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.Graph] Graphs
+   Method Boolean HaveArg(System.String)
+   Method Boolean IsConstArg(OnnxSharp.Core.Arg)
+   Property OnnxSharp.Core.Graph MainGraph
+   Method OnnxSharp.Core.Arg NewConstArg(System.String, OnnxSharp.Tensors.Tensor)
+   Method OnnxSharp.Core.Graph NewGraph(System.String, System.Collections.Generic.IEnumerable`1[OnnxSharp.Core.Arg], Boolean)
+   Method OnnxSharp.Core.Arg Require(System.String)
+   Method Void ResetBuffers()
+   Method Void SetInput(System.String, OnnxSharp.Tensors.Tensor)
+   Property Int32 SlotCount
+   Property Int32 TempCount
+   Method Boolean TryGetArg(System.String, OnnxSharp.Core.Arg ByRef)
+== OnnxSharp.Core.OnnxSharpException
+   Constructor Void .ctor(System.String)
+   Constructor Void .ctor(System.String, System.Exception)
+== OnnxSharp.Core.OpTiming
+   Constructor Void .ctor(System.String, System.String, Double, Int32, Double, Int64)
+   Method OnnxSharp.Core.OpTiming <Clone>$()
+   Property Int64 AllocatedBytes
+   Property Double Average
+   Property Int32 Calls
+   Method Void Deconstruct(System.String ByRef, System.String ByRef, Double ByRef, Int32 ByRef, Double ByRef, Int64 ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Core.OpTiming)
+   Method Int64 get_AllocatedBytes()
+   Method Double get_Average()
+   Method Int32 get_Calls()
+   Method Double get_Milliseconds()
+   Method Double get_MinMilliseconds()
+   Method System.String get_Name()
+   Method System.String get_Type()
+   Method Int32 GetHashCode()
+   Property Double Milliseconds
+   Property Double MinMilliseconds
+   Property System.String Name
+   Method Boolean op_Equality(OnnxSharp.Core.OpTiming, OnnxSharp.Core.OpTiming)
+   Method Boolean op_Inequality(OnnxSharp.Core.OpTiming, OnnxSharp.Core.OpTiming)
+   Method Void set_AllocatedBytes(Int64)
+   Method Void set_Calls(Int32)
+   Method Void set_Milliseconds(Double)
+   Method Void set_MinMilliseconds(Double)
+   Method Void set_Name(System.String)
+   Method Void set_Type(System.String)
+   Method System.String ToString()
+   Property System.String Type
+== OnnxSharp.Engine.BufferAllocator
+   Method System.ValueTuple`2[System.Int32[],System.Int32[]] Analyze(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.LayerInfo], System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.Arg], Int32)
+   Method Int32[] Assign(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.LayerInfo], System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Core.Arg], Int32, Int32 ByRef)
+   Field Int32 NeverWritten
+   Field Int32 NoSlot
+== OnnxSharp.Imaging.AxisMap
+   Method OnnxSharp.Imaging.AxisMap Bilinear(Int32, Int32)
+   Property Single[] Fraction
+   Method Single[] get_Fraction()
+   Method Int32 get_Length()
+   Method Int32[] get_Lower()
+   Method Int32[] get_Upper()
+   Property Int32 Length
+   Property Int32[] Lower
+   Method OnnxSharp.Imaging.AxisMap Nearest(Int32, Int32)
+   Property Int32[] Upper
+== OnnxSharp.Imaging.ImageGeometry
+   Method OnnxSharp.Imaging.ImagePlacement Contain(Int32, Int32, Int32, Int32, Boolean)
+   Method OnnxSharp.Imaging.ImagePlacement Stretch(Int32, Int32, Int32, Int32)
+== OnnxSharp.Imaging.ImagePixels
+   Constructor Void .ctor(System.ReadOnlySpan`1[System.Byte], Int32, Int32, OnnxSharp.Imaging.PixelFormat, Int32)
+   Property Int32 BytesPerPixel
+   Method Int32 BytesPerPixelOf(OnnxSharp.Imaging.PixelFormat)
+   Method Int32 ChannelOffset(Int32)
+   Property OnnxSharp.Imaging.PixelFormat Format
+   Method OnnxSharp.Imaging.ImagePixels FromBgr(System.ReadOnlySpan`1[System.Byte], Int32, Int32, Boolean, Int32)
+   Method Int32 get_BytesPerPixel()
+   Method OnnxSharp.Imaging.PixelFormat get_Format()
+   Method Int32 get_Height()
+   Method Boolean get_IsBgr()
+   Method System.ReadOnlySpan`1[System.Byte] get_Pixels()
+   Method Int32 get_RowStride()
+   Method Int32 get_Width()
+   Property Int32 Height
+   Property Boolean IsBgr
+   Property System.ReadOnlySpan`1[System.Byte] Pixels
+   Property Int32 RowStride
+   Property Int32 Width
+== OnnxSharp.Imaging.ImagePlacement
+   Constructor Void .ctor(Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32)
+   Method Void Deconstruct(Int32 ByRef, Int32 ByRef, Int32 ByRef, Int32 ByRef, Int32 ByRef, Int32 ByRef, Int32 ByRef, Int32 ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Imaging.ImagePlacement)
+   Method Int32 get_OffsetX()
+   Method Int32 get_OffsetY()
+   Method Int32 get_ResizedHeight()
+   Method Int32 get_ResizedWidth()
+   Method Single get_ScaleX()
+   Method Single get_ScaleY()
+   Method Int32 get_SourceHeight()
+   Method Int32 get_SourceWidth()
+   Method Int32 get_TargetHeight()
+   Method Int32 get_TargetWidth()
+   Method Int32 GetHashCode()
+   Property Int32 OffsetX
+   Property Int32 OffsetY
+   Method Boolean op_Equality(OnnxSharp.Imaging.ImagePlacement, OnnxSharp.Imaging.ImagePlacement)
+   Method Boolean op_Inequality(OnnxSharp.Imaging.ImagePlacement, OnnxSharp.Imaging.ImagePlacement)
+   Property Int32 ResizedHeight
+   Property Int32 ResizedWidth
+   Property Single ScaleX
+   Property Single ScaleY
+   Method Void set_OffsetX(Int32)
+   Method Void set_OffsetY(Int32)
+   Method Void set_ResizedHeight(Int32)
+   Method Void set_ResizedWidth(Int32)
+   Method Void set_SourceHeight(Int32)
+   Method Void set_SourceWidth(Int32)
+   Method Void set_TargetHeight(Int32)
+   Method Void set_TargetWidth(Int32)
+   Property Int32 SourceHeight
+   Property Int32 SourceWidth
+   Property Int32 TargetHeight
+   Property Int32 TargetWidth
+   Method System.String ToString()
+== OnnxSharp.Imaging.ImageTensor
+   Method Void ToChw(OnnxSharp.Imaging.ImagePixels, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Int32, Single, System.Span`1[System.Single], System.Nullable`1[OnnxSharp.Vision.ChannelNormalization], OnnxSharp.Imaging.ResizeInterpolation, Boolean)
+== OnnxSharp.Imaging.PixelFormat
+   Field OnnxSharp.Imaging.PixelFormat Bgr24
+   Field OnnxSharp.Imaging.PixelFormat Bgra32
+   Field OnnxSharp.Imaging.PixelFormat Rgb24
+   Field OnnxSharp.Imaging.PixelFormat Rgba32
+   Field Int32 value__
+== OnnxSharp.Imaging.ResizeInterpolation
+   Field OnnxSharp.Imaging.ResizeInterpolation Bilinear
+   Field OnnxSharp.Imaging.ResizeInterpolation Nearest
+   Field Int32 value__
+== OnnxSharp.Kernels.Int8DequantGemm
+   Method Void Multiply(System.ReadOnlySpan`1[System.Byte], Int32, Int32, Single, Int32, System.ReadOnlySpan`1[System.Byte], Int32, Single, Int32, System.Span`1[System.Single], Int32)
+== OnnxSharp.Kernels.Int8F32Gemm
+   Method Void MultiplyInteger(System.ReadOnlySpan`1[System.Single], System.ReadOnlySpan`1[System.Single], System.Span`1[System.Int32], Int32, Int32, Int32)
+   Method Void WidenActivation(System.ReadOnlySpan`1[System.Byte], System.Span`1[System.Single], Int32)
+   Method Void WidenActivation(System.ReadOnlySpan`1[System.SByte], System.Span`1[System.Single], Int32)
+   Method Void WidenWeights(System.ReadOnlySpan`1[System.Byte], System.Span`1[System.Single], Int32, Int32, System.ReadOnlySpan`1[System.Int32])
+   Method Void WidenWeights(System.ReadOnlySpan`1[System.SByte], System.Span`1[System.Single], Int32, Int32, System.ReadOnlySpan`1[System.Int32])
+== OnnxSharp.Kernels.Int8Gemm
+   Method Void MultiplyInteger(System.ReadOnlySpan`1[System.Byte], OnnxSharp.Kernels.PackedInt8Weights, System.Span`1[System.Int32], Int32, Int32)
+   Method Void MultiplyIntegerScalar(System.ReadOnlySpan`1[System.Byte], OnnxSharp.Kernels.PackedInt8Weights, System.Span`1[System.Int32], Int32, Int32)
+== OnnxSharp.Kernels.Int8Kernel
+   Method System.String Describe()
+   Method OnnxSharp.Kernels.Int8KernelTier get_Tier()
+   Property OnnxSharp.Kernels.Int8KernelTier Tier
+== OnnxSharp.Kernels.Int8KernelTier
+   Field OnnxSharp.Kernels.Int8KernelTier Avx512Bw
+   Field OnnxSharp.Kernels.Int8KernelTier AvxVnni
+   Field OnnxSharp.Kernels.Int8KernelTier Scalar
+   Field Int32 value__
+== OnnxSharp.Kernels.MatMulArgMaxKernel
+   Method Void Compute(System.ReadOnlySpan`1[System.Single], System.ReadOnlySpan`1[System.Single], System.ReadOnlySpan`1[System.Single], Int32, Int32, Int32, System.Span`1[System.Int64], System.Span`1[System.Single], Boolean)
+== OnnxSharp.Kernels.PackedInt8Weights
+   Property Int32[] BZeroPoints
+   Property Int32[] ColumnSums
+   Property Byte[] Data
+   Method Int32[] get_BZeroPoints()
+   Method Int32[] get_ColumnSums()
+   Method Byte[] get_Data()
+   Method Int32 get_K()
+   Method Int32 get_KPadded()
+   Method Int32 get_N()
+   Method Int32 get_NPadded()
+   Method Int32 get_ZeroPointOffset()
+   Property Int32 K
+   Property Int32 KPadded
+   Property Int32 N
+   Property Int32 NPadded
+   Method OnnxSharp.Kernels.PackedInt8Weights Pack(System.ReadOnlySpan`1[System.Byte], Int32, Int32, System.ReadOnlySpan`1[System.Int32])
+   Method OnnxSharp.Kernels.PackedInt8Weights PackSigned(System.ReadOnlySpan`1[System.SByte], Int32, Int32, System.ReadOnlySpan`1[System.Int32])
+   Property Int32 ZeroPointOffset
+== OnnxSharp.Ocr.PaddleOCR.OcrLine
+   Constructor Void .ctor(System.String, Single, Single, Single, Single, Single)
+   Method Void Deconstruct(System.String ByRef, Single ByRef, Single ByRef, Single ByRef, Single ByRef, Single ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Ocr.PaddleOCR.OcrLine)
+   Method Single get_Height()
+   Method Single get_Score()
+   Method System.String get_Text()
+   Method Single get_Width()
+   Method Single get_X()
+   Method Single get_Y()
+   Method Int32 GetHashCode()
+   Property Single Height
+   Method Boolean op_Equality(OnnxSharp.Ocr.PaddleOCR.OcrLine, OnnxSharp.Ocr.PaddleOCR.OcrLine)
+   Method Boolean op_Inequality(OnnxSharp.Ocr.PaddleOCR.OcrLine, OnnxSharp.Ocr.PaddleOCR.OcrLine)
+   Property Single Score
+   Method Void set_Height(Single)
+   Method Void set_Score(Single)
+   Method Void set_Text(System.String)
+   Method Void set_Width(Single)
+   Method Void set_X(Single)
+   Method Void set_Y(Single)
+   Property System.String Text
+   Method System.String ToString()
+   Property Single Width
+   Property Single X
+   Property Single Y
+== OnnxSharp.Ocr.PaddleOCR.OcrPixelFormat
+   Field OnnxSharp.Ocr.PaddleOCR.OcrPixelFormat Bgr24
+   Field OnnxSharp.Ocr.PaddleOCR.OcrPixelFormat Bgra32
+   Field OnnxSharp.Ocr.PaddleOCR.OcrPixelFormat Rgb24
+   Field OnnxSharp.Ocr.PaddleOCR.OcrPixelFormat Rgba32
+   Field Int32 value__
+== OnnxSharp.Ocr.PaddleOCR.OcrTimings
+   Constructor Void .ctor(Double, Double, Double, Double, Double)
+   Method OnnxSharp.Ocr.PaddleOCR.OcrTimings <Clone>$()
+   Property Double Classification
+   Method Void Deconstruct(Double ByRef, Double ByRef, Double ByRef, Double ByRef, Double ByRef)
+   Property Double DetForward
+   Property Double DetPostprocess
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Ocr.PaddleOCR.OcrTimings)
+   Method Double get_Classification()
+   Method Double get_DetForward()
+   Method Double get_DetPostprocess()
+   Method Double get_Preprocess()
+   Method Double get_Recognition()
+   Method Double get_Total()
+   Method Int32 GetHashCode()
+   Method Boolean op_Equality(OnnxSharp.Ocr.PaddleOCR.OcrTimings, OnnxSharp.Ocr.PaddleOCR.OcrTimings)
+   Method Boolean op_Inequality(OnnxSharp.Ocr.PaddleOCR.OcrTimings, OnnxSharp.Ocr.PaddleOCR.OcrTimings)
+   Property Double Preprocess
+   Property Double Recognition
+   Method Void set_Classification(Double)
+   Method Void set_DetForward(Double)
+   Method Void set_DetPostprocess(Double)
+   Method Void set_Preprocess(Double)
+   Method Void set_Recognition(Double)
+   Method System.String ToString()
+   Property Double Total
+== OnnxSharp.Ocr.PaddleOCR.PaddleOcrModel
+   Property System.Collections.Generic.IReadOnlyList`1[System.String] Classes
+   Method OnnxSharp.Ocr.PaddleOCR.PaddleOcrModel FromBytes(Byte[], Byte[], System.String, Byte[], System.String)
+   Method OnnxSharp.Ocr.PaddleOCR.PaddleOcrModel FromFiles(System.String, System.String, System.String, System.String)
+   Method OnnxSharp.Ocr.PaddleOCR.PaddleOcrModel FromStreams(System.IO.Stream, System.IO.Stream, System.IO.TextReader, System.IO.Stream, System.String)
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] get_Classes()
+   Method Boolean get_HasClassification()
+   Method System.String get_Name()
+   Property Boolean HasClassification
+   Property System.String Name
+   Method System.String ToString()
+== OnnxSharp.Ocr.PaddleOCR.PaddleOcrOptions
+   Constructor Void .ctor()
+   Property Single BoxThreshold
+   Property Boolean CollectTimings
+   Property Int32 DetLimitSide
+   Property Int32 DetShapeCacheSize
+   Property Single DetThreshold
+   Method Single get_BoxThreshold()
+   Method Boolean get_CollectTimings()
+   Method Int32 get_DetLimitSide()
+   Method Int32 get_DetShapeCacheSize()
+   Method Single get_DetThreshold()
+   Method Int32 get_RecHeight()
+   Method Int32 get_RecMaxWidth()
+   Method Int32 get_RecShapeCacheSize()
+   Method Single get_UnclipRatio()
+   Method Single get_UpsideDownThreshold()
+   Method Boolean get_UseClassification()
+   Property Int32 RecHeight
+   Property Int32 RecMaxWidth
+   Property Int32 RecShapeCacheSize
+   Method Void set_BoxThreshold(Single)
+   Method Void set_CollectTimings(Boolean)
+   Method Void set_DetLimitSide(Int32)
+   Method Void set_DetShapeCacheSize(Int32)
+   Method Void set_DetThreshold(Single)
+   Method Void set_RecHeight(Int32)
+   Method Void set_RecMaxWidth(Int32)
+   Method Void set_RecShapeCacheSize(Int32)
+   Method Void set_UnclipRatio(Single)
+   Method Void set_UpsideDownThreshold(Single)
+   Method Void set_UseClassification(Boolean)
+   Property Single UnclipRatio
+   Property Single UpsideDownThreshold
+   Property Boolean UseClassification
+== OnnxSharp.Ocr.PaddleOCR.PaddleOcrPipeline
+   Constructor Void .ctor(OnnxSharp.Ocr.PaddleOCR.PaddleOcrModel, OnnxSharp.Ocr.PaddleOCR.PaddleOcrOptions)
+   Method OnnxSharp.Ocr.PaddleOCR.OcrTimings get_LastTimings()
+   Method OnnxSharp.Ocr.PaddleOCR.PaddleOcrModel get_Model()
+   Method OnnxSharp.Ocr.PaddleOCR.PaddleOcrOptions get_Options()
+   Property OnnxSharp.Ocr.PaddleOCR.OcrTimings LastTimings
+   Property OnnxSharp.Ocr.PaddleOCR.PaddleOcrModel Model
+   Property OnnxSharp.Ocr.PaddleOCR.PaddleOcrOptions Options
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Ocr.PaddleOCR.OcrLine] Run(System.ReadOnlySpan`1[System.Byte], Int32, Int32, OnnxSharp.Ocr.PaddleOCR.OcrPixelFormat, Int32)
+== OnnxSharp.Ocr.Plate.PlateCharset
+   Method System.ReadOnlySpan`1[System.Char] AllowedAt(Int32, Int32)
+   Method Boolean Contains(Char)
+   Property Int32 Count
+   Property OnnxSharp.Ocr.Plate.PlateCharset Default
+   Field System.String Digits
+   Method Int32 get_Count()
+   Method OnnxSharp.Ocr.Plate.PlateCharset get_Default()
+   Method Char[] get_RankToChar()
+   Field System.String Letters
+   Field Int32 MaxLength
+   Field System.String Provinces
+   Method Int32 RankOf(Char)
+   Property Char[] RankToChar
+   Field System.String TailChars
+== OnnxSharp.Ocr.Plate.PlateDecoder
+   Method OnnxSharp.Ocr.Plate.PlateDecoding Decode(System.ReadOnlySpan`1[System.Single], Int32, System.Collections.Generic.IReadOnlyList`1[System.String], OnnxSharp.Ocr.Plate.PlateCharset, OnnxSharp.Ocr.Plate.PlateDecoderOptions)
+== OnnxSharp.Ocr.Plate.PlateDecoderOptions
+   Constructor Void .ctor()
+   Property Int32 BeamWidth
+   Method Int32 get_BeamWidth()
+   Method Int32 get_MaxLength()
+   Method Int32 get_MinLength()
+   Method Boolean get_UseStructure()
+   Method Boolean get_Validate()
+   Property Int32 MaxLength
+   Property Int32 MinLength
+   Method Void set_BeamWidth(Int32)
+   Method Void set_MaxLength(Int32)
+   Method Void set_MinLength(Int32)
+   Method Void set_UseStructure(Boolean)
+   Method Void set_Validate(Boolean)
+   Property Boolean UseStructure
+   Property Boolean Validate
+== OnnxSharp.Ocr.Plate.PlateDecoding
+   Property Single[] CharScores
+   Property Int32[] ClassIndices
+   Method Single[] get_CharScores()
+   Method Int32[] get_ClassIndices()
+   Method Boolean get_IsPlate()
+   Method OnnxSharp.Ocr.Plate.PlateNumber get_Plate()
+   Method Single get_Probability()
+   Method Single get_Score()
+   Method Int32[] get_Steps()
+   Method System.String get_Text()
+   Property Boolean IsPlate
+   Property OnnxSharp.Ocr.Plate.PlateNumber Plate
+   Property Single Probability
+   Property Single Score
+   Property Int32[] Steps
+   Property System.String Text
+   Method System.String ToString()
+== OnnxSharp.Ocr.Plate.PlateKind
+   Field OnnxSharp.Ocr.Plate.PlateKind Coach
+   Field OnnxSharp.Ocr.Plate.PlateKind Embassy
+   Field OnnxSharp.Ocr.Plate.PlateKind Fuel
+   Field OnnxSharp.Ocr.Plate.PlateKind HongKong
+   Field OnnxSharp.Ocr.Plate.PlateKind Macao
+   Field OnnxSharp.Ocr.Plate.PlateKind NewEnergy
+   Field OnnxSharp.Ocr.Plate.PlateKind Police
+   Field OnnxSharp.Ocr.Plate.PlateKind Trailer
+   Field OnnxSharp.Ocr.Plate.PlateKind Unknown
+   Field Int32 value__
+== OnnxSharp.Ocr.Plate.PlateNumber
+   Method OnnxSharp.Ocr.Plate.PlateKind get_Kind()
+   Method Int32 get_Length()
+   Method Char get_Letter()
+   Method Char get_Province()
+   Method System.String get_Serial()
+   Method System.String get_Text()
+   Property OnnxSharp.Ocr.Plate.PlateKind Kind
+   Property Int32 Length
+   Property Char Letter
+   Property Char Province
+   Property System.String Serial
+   Property System.String Text
+   Method System.String ToString()
+   Method Boolean TryParse(System.String, OnnxSharp.Ocr.Plate.PlateNumber ByRef, OnnxSharp.Ocr.Plate.PlateCharset)
+== OnnxSharp.Ocr.Plate.PlateReader
+   Constructor Void .ctor(OnnxSharp.Ocr.PaddleOCR.PaddleOcrPipeline, OnnxSharp.Ocr.Plate.PlateReaderOptions, OnnxSharp.Ocr.Plate.PlateCharset)
+   Property OnnxSharp.Ocr.Plate.PlateCharset Charset
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Ocr.Plate.PlateResult] DetectAndRead(System.ReadOnlySpan`1[System.Byte], Int32, Int32, OnnxSharp.Ocr.PaddleOCR.OcrPixelFormat, Int32)
+   Method OnnxSharp.Ocr.Plate.PlateCharset get_Charset()
+   Method OnnxSharp.Ocr.Plate.PlateReaderOptions get_Options()
+   Method OnnxSharp.Ocr.PaddleOCR.PaddleOcrPipeline get_Pipeline()
+   Property OnnxSharp.Ocr.Plate.PlateReaderOptions Options
+   Property OnnxSharp.Ocr.PaddleOCR.PaddleOcrPipeline Pipeline
+   Method OnnxSharp.Ocr.Plate.PlateResult Read(System.ReadOnlySpan`1[System.Byte], Int32, Int32, OnnxSharp.Ocr.PaddleOCR.OcrPixelFormat, Int32, Int32, Int32, Int32, Int32)
+   Method OnnxSharp.Ocr.Plate.PlateResult ReadWhole(System.ReadOnlySpan`1[System.Byte], Int32, Int32, OnnxSharp.Ocr.PaddleOCR.OcrPixelFormat, Int32)
+== OnnxSharp.Ocr.Plate.PlateReaderOptions
+   Constructor Void .ctor()
+   Property OnnxSharp.Ocr.Plate.PlateDecoderOptions Decoder
+   Property Boolean FilterByAspect
+   Method OnnxSharp.Ocr.Plate.PlateDecoderOptions get_Decoder()
+   Method Boolean get_FilterByAspect()
+   Method Single get_MaxAspect()
+   Method Int32 get_MaxPlates()
+   Method Single get_MinAspect()
+   Method Single get_MinScore()
+   Property Single MaxAspect
+   Property Int32 MaxPlates
+   Property Single MinAspect
+   Property Single MinScore
+   Method Void set_Decoder(OnnxSharp.Ocr.Plate.PlateDecoderOptions)
+   Method Void set_FilterByAspect(Boolean)
+   Method Void set_MaxAspect(Single)
+   Method Void set_MaxPlates(Int32)
+   Method Void set_MinAspect(Single)
+   Method Void set_MinScore(Single)
+== OnnxSharp.Ocr.Plate.PlateResult
+   Property OnnxSharp.Ocr.Plate.PlateDecoding Decoding
+   Method OnnxSharp.Ocr.Plate.PlateDecoding get_Decoding()
+   Method Int32 get_Height()
+   Method OnnxSharp.Ocr.Plate.PlateNumber get_Plate()
+   Method Single get_Score()
+   Method System.String get_Text()
+   Method Int32 get_Width()
+   Method Int32 get_X()
+   Method Int32 get_Y()
+   Property Int32 Height
+   Property OnnxSharp.Ocr.Plate.PlateNumber Plate
+   Property Single Score
+   Property System.String Text
+   Method System.String ToString()
+   Property Int32 Width
+   Property Int32 X
+   Property Int32 Y
+== OnnxSharp.Onnx.OnnxTensorInfo
+   Constructor Void .ctor(System.String, Int32, Int64[])
+   Method OnnxSharp.Onnx.OnnxTensorInfo <Clone>$()
+   Method Void Deconstruct(System.String ByRef, Int32 ByRef, Int64[] ByRef)
+   Property Int64[] Dims
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Onnx.OnnxTensorInfo)
+   Method Int64[] get_Dims()
+   Method System.String get_Name()
+   Method Int32 get_OnnxDataType()
+   Method Int32 GetHashCode()
+   Property System.String Name
+   Property Int32 OnnxDataType
+   Method Boolean op_Equality(OnnxSharp.Onnx.OnnxTensorInfo, OnnxSharp.Onnx.OnnxTensorInfo)
+   Method Boolean op_Inequality(OnnxSharp.Onnx.OnnxTensorInfo, OnnxSharp.Onnx.OnnxTensorInfo)
+   Method Void set_Dims(Int64[])
+   Method Void set_Name(System.String)
+   Method Void set_OnnxDataType(Int32)
+   Method System.String ToString()
+== OnnxSharp.Onnx.OnnxWeightPatcher
+   Method OnnxSharp.Onnx.OnnxWeightPatchReport Apply(System.String, OnnxSharp.Safetensors.SafeTensorFile, System.String, OnnxSharp.Onnx.OnnxWeightPatchOptions)
+   Method OnnxExtractReport Extract(System.String, System.String, System.String, System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.String])
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Onnx.OnnxTensorInfo] Inspect(System.String)
+   NestedType OnnxSharp.Onnx.OnnxWeightPatcher+OnnxExtractReport
+== OnnxSharp.Onnx.OnnxWeightPatcher+OnnxExtractReport
+   Constructor Void .ctor(Int32, Int64, System.String, System.String, Int64)
+   Method OnnxExtractReport <Clone>$()
+   Method Void Deconstruct(Int32 ByRef, Int64 ByRef, System.String ByRef, System.String ByRef, Int64 ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxExtractReport)
+   Method Int64 get_SkeletonBytes()
+   Method System.String get_SkeletonPath()
+   Method Int32 get_Tensors()
+   Method Int64 get_WeightBytes()
+   Method System.String get_WeightsPath()
+   Method Int32 GetHashCode()
+   Method Boolean op_Equality(OnnxExtractReport, OnnxExtractReport)
+   Method Boolean op_Inequality(OnnxExtractReport, OnnxExtractReport)
+   Method Void set_SkeletonBytes(Int64)
+   Method Void set_SkeletonPath(System.String)
+   Method Void set_Tensors(Int32)
+   Method Void set_WeightBytes(Int64)
+   Method Void set_WeightsPath(System.String)
+   Property Int64 SkeletonBytes
+   Property System.String SkeletonPath
+   Property Int32 Tensors
+   Method System.String ToString()
+   Property Int64 WeightBytes
+   Property System.String WeightsPath
+== OnnxSharp.Onnx.OnnxWeightPatchOptions
+   Constructor Void .ctor()
+   Property System.String ExternalDataName
+   Property Int64 ExternalDataThreshold
+   Method System.String get_ExternalDataName()
+   Method Int64 get_ExternalDataThreshold()
+   Method System.Collections.Generic.Dictionary`2[System.String,System.String] get_Rename()
+   Method Boolean get_Strict()
+   Method System.String[] get_StripPrefixes()
+   Property System.Collections.Generic.Dictionary`2[System.String,System.String] Rename
+   Method Void set_ExternalDataName(System.String)
+   Method Void set_ExternalDataThreshold(Int64)
+   Method Void set_Strict(Boolean)
+   Method Void set_StripPrefixes(System.String[])
+   Property Boolean Strict
+   Property System.String[] StripPrefixes
+== OnnxSharp.Onnx.OnnxWeightPatchReport
+   Constructor Void .ctor(Int32, Int32, Int64, Int64, System.Collections.Generic.IReadOnlyList`1[System.String], System.Collections.Generic.IReadOnlyList`1[System.String], System.String)
+   Method OnnxSharp.Onnx.OnnxWeightPatchReport <Clone>$()
+   Method Void Deconstruct(Int32 ByRef, Int32 ByRef, Int64 ByRef, Int64 ByRef, System.Collections.Generic.IReadOnlyList`1[System.String] ByRef, System.Collections.Generic.IReadOnlyList`1[System.String] ByRef, System.String ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Onnx.OnnxWeightPatchReport)
+   Property Int64 ExternalBytes
+   Property System.String ExternalDataPath
+   Method Int64 get_ExternalBytes()
+   Method System.String get_ExternalDataPath()
+   Method Int64 get_InlineBytes()
+   Method Int32 get_KeptOriginal()
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] get_MissingInWeights()
+   Method Int32 get_Patched()
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] get_UnusedWeights()
+   Method Int32 GetHashCode()
+   Property Int64 InlineBytes
+   Property Int32 KeptOriginal
+   Property System.Collections.Generic.IReadOnlyList`1[System.String] MissingInWeights
+   Method Boolean op_Equality(OnnxSharp.Onnx.OnnxWeightPatchReport, OnnxSharp.Onnx.OnnxWeightPatchReport)
+   Method Boolean op_Inequality(OnnxSharp.Onnx.OnnxWeightPatchReport, OnnxSharp.Onnx.OnnxWeightPatchReport)
+   Property Int32 Patched
+   Method Void set_ExternalBytes(Int64)
+   Method Void set_ExternalDataPath(System.String)
+   Method Void set_InlineBytes(Int64)
+   Method Void set_KeptOriginal(Int32)
+   Method Void set_MissingInWeights(System.Collections.Generic.IReadOnlyList`1[System.String])
+   Method Void set_Patched(Int32)
+   Method Void set_UnusedWeights(System.Collections.Generic.IReadOnlyList`1[System.String])
+   Method System.String ToString()
+   Property System.Collections.Generic.IReadOnlyList`1[System.String] UnusedWeights
+== OnnxSharp.Ops.ActivationLayer
+   Method Void Forward(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor], System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor], System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor])
+   Method Void GetMemoryShapes(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.TensorShape], Int32, System.Collections.Generic.List`1[OnnxSharp.Tensors.TensorShape], System.Collections.Generic.List`1[OnnxSharp.Tensors.TensorShape])
+   Method Void Register()
+== OnnxSharp.Ops.NaryEltwiseLayer
+   Method Void Forward(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor], System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor], System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor])
+   Method Void GetMemoryShapes(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.TensorShape], Int32, System.Collections.Generic.List`1[OnnxSharp.Tensors.TensorShape], System.Collections.Generic.List`1[OnnxSharp.Tensors.TensorShape])
+   Method Void Register()
+== OnnxSharp.Safetensors.SafeTensorFile
+   Method Boolean Contains(System.String)
+   Method Void Dispose()
+   Method System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.String] get_Metadata()
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] get_Names()
+   Method System.String get_Path()
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Safetensors.SafeTensorInfo] get_Tensors()
+   Method OnnxSharp.Tensors.Tensor GetTensor(System.String)
+   Method OnnxSharp.Safetensors.SafeTensorInfo Info(System.String)
+   Property System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.String] Metadata
+   Property System.Collections.Generic.IReadOnlyList`1[System.String] Names
+   Method OnnxSharp.Safetensors.SafeTensorFile Open(System.String)
+   Property System.String Path
+   Method Byte[] ReadRaw(System.String)
+   Method Byte[] ReadRaw(OnnxSharp.Safetensors.SafeTensorInfo)
+   Method Void ReadRaw(OnnxSharp.Safetensors.SafeTensorInfo, System.Span`1[System.Byte])
+   Property System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Safetensors.SafeTensorInfo] Tensors
+   Method Boolean TryGetInfo(System.String, OnnxSharp.Safetensors.SafeTensorInfo ByRef)
+== OnnxSharp.Safetensors.SafeTensorInfo
+   Constructor Void .ctor(System.String, System.String, Int64[], Int64, Int64)
+   Method OnnxSharp.Safetensors.SafeTensorInfo <Clone>$()
+   Property Int64 Begin
+   Property Int64 ByteLength
+   Method Void Deconstruct(System.String ByRef, System.String ByRef, Int64[] ByRef, Int64 ByRef, Int64 ByRef)
+   Property System.String DType
+   Property Int64 ElementCount
+   Property Int64 End
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Safetensors.SafeTensorInfo)
+   Method Int64 get_Begin()
+   Method Int64 get_ByteLength()
+   Method System.String get_DType()
+   Method Int64 get_ElementCount()
+   Method Int64 get_End()
+   Method System.String get_Name()
+   Method Int64[] get_Shape()
+   Method Int32 GetHashCode()
+   Property System.String Name
+   Method Boolean op_Equality(OnnxSharp.Safetensors.SafeTensorInfo, OnnxSharp.Safetensors.SafeTensorInfo)
+   Method Boolean op_Inequality(OnnxSharp.Safetensors.SafeTensorInfo, OnnxSharp.Safetensors.SafeTensorInfo)
+   Method Void set_Begin(Int64)
+   Method Void set_DType(System.String)
+   Method Void set_End(Int64)
+   Method Void set_Name(System.String)
+   Method Void set_Shape(Int64[])
+   Property Int64[] Shape
+   Method System.String ToString()
+== OnnxSharp.Safetensors.SafeTensorWriter
+   Constructor Void .ctor()
+   Method Void Add(System.String, System.String, Int64[], System.ReadOnlySpan`1[System.Byte])
+   Property Int64 ByteCount
+   Property Int32 Count
+   Method Int64 get_ByteCount()
+   Method Int32 get_Count()
+   Method Void Save(System.String, System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.String])
+   Method Byte[] ToBytes(System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.String])
+== OnnxSharp.Sam3.Sam3Box
+   Constructor Void .ctor(Single, Single, Single, Single)
+   Method Void Deconstruct(Single ByRef, Single ByRef, Single ByRef, Single ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Sam3.Sam3Box)
+   Method Single get_Height()
+   Method Single get_Width()
+   Method Single get_X1()
+   Method Single get_X2()
+   Method Single get_Y1()
+   Method Single get_Y2()
+   Method Int32 GetHashCode()
+   Property Single Height
+   Method Boolean op_Equality(OnnxSharp.Sam3.Sam3Box, OnnxSharp.Sam3.Sam3Box)
+   Method Boolean op_Inequality(OnnxSharp.Sam3.Sam3Box, OnnxSharp.Sam3.Sam3Box)
+   Method Void set_X1(Single)
+   Method Void set_X2(Single)
+   Method Void set_Y1(Single)
+   Method Void set_Y2(Single)
+   Method System.String ToString()
+   Property Single Width
+   Property Single X1
+   Property Single X2
+   Property Single Y1
+   Property Single Y2
+== OnnxSharp.Sam3.Sam3Item
+   Constructor Void .ctor(Single, OnnxSharp.Sam3.Sam3Box, Single[], Int32, Int32)
+   Method OnnxSharp.Sam3.Sam3Item <Clone>$()
+   Property OnnxSharp.Sam3.Sam3Box Box
+   Method Void Deconstruct(Single ByRef, OnnxSharp.Sam3.Sam3Box ByRef, Single[] ByRef, Int32 ByRef, Int32 ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Sam3.Sam3Item)
+   Method OnnxSharp.Sam3.Sam3Box get_Box()
+   Method Single[] get_Mask()
+   Method Int32 get_MaskHeight()
+   Method Int32 get_MaskWidth()
+   Method Single get_Score()
+   Method Int32 GetHashCode()
+   Property Single[] Mask
+   Property Int32 MaskHeight
+   Property Int32 MaskWidth
+   Method Boolean op_Equality(OnnxSharp.Sam3.Sam3Item, OnnxSharp.Sam3.Sam3Item)
+   Method Boolean op_Inequality(OnnxSharp.Sam3.Sam3Item, OnnxSharp.Sam3.Sam3Item)
+   Property Single Score
+   Method Void set_Box(OnnxSharp.Sam3.Sam3Box)
+   Method Void set_Mask(Single[])
+   Method Void set_MaskHeight(Int32)
+   Method Void set_MaskWidth(Int32)
+   Method Void set_Score(Single)
+   Method System.String ToString()
+== OnnxSharp.Sam3.Sam3Options
+   Constructor Void .ctor()
+   Property OnnxSharp.Sam3.Sam3PromptBoxFormat BoxFormat
+   Property Int64 BoxLabel
+   Property System.Action`1[System.String] Diagnostic
+   Method OnnxSharp.Sam3.Sam3PromptBoxFormat get_BoxFormat()
+   Method Int64 get_BoxLabel()
+   Method System.Action`1[System.String] get_Diagnostic()
+   Method Int32 get_ImageSize()
+   Method Single get_IouThreshold()
+   Method Int32 get_MaskSize()
+   Method Int32 get_MaxItems()
+   Method System.String get_ModelDirectory()
+   Method Single get_ScoreThreshold()
+   Method Int32 get_ShapeCacheSize()
+   Property Int32 ImageSize
+   Property Single IouThreshold
+   Property Int32 MaskSize
+   Property Int32 MaxItems
+   Property System.String ModelDirectory
+   Property Single ScoreThreshold
+   Method Void set_BoxFormat(OnnxSharp.Sam3.Sam3PromptBoxFormat)
+   Method Void set_BoxLabel(Int64)
+   Method Void set_Diagnostic(System.Action`1[System.String])
+   Method Void set_ImageSize(Int32)
+   Method Void set_IouThreshold(Single)
+   Method Void set_MaskSize(Int32)
+   Method Void set_MaxItems(Int32)
+   Method Void set_ModelDirectory(System.String)
+   Method Void set_ScoreThreshold(Single)
+   Method Void set_ShapeCacheSize(Int32)
+   Property Int32 ShapeCacheSize
+== OnnxSharp.Sam3.Sam3PromptBoxFormat
+   Field OnnxSharp.Sam3.Sam3PromptBoxFormat CxcywhNormalized
+   Field Int32 value__
+   Field OnnxSharp.Sam3.Sam3PromptBoxFormat XyxyModelPixels
+   Field OnnxSharp.Sam3.Sam3PromptBoxFormat XyxyNormalized
+== OnnxSharp.Sam3.Sam3Result
+   Property Int32 EmbeddedHeight
+   Property Int32 EmbeddedWidth
+   Method Int32 get_EmbeddedHeight()
+   Method Int32 get_EmbeddedWidth()
+   Method Int32 get_ImageHeight()
+   Method Int32 get_ImageSize()
+   Method Int32 get_ImageWidth()
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Sam3.Sam3Item] get_Items()
+   Method Single get_MaskScaleX()
+   Method Single get_MaskScaleY()
+   Method Int32 get_MaskSize()
+   Method Single get_PresenceScore()
+   Property Int32 ImageHeight
+   Property Int32 ImageSize
+   Property Int32 ImageWidth
+   Property System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Sam3.Sam3Item] Items
+   Property Single MaskScaleX
+   Property Single MaskScaleY
+   Property Int32 MaskSize
+   Property Single PresenceScore
+== OnnxSharp.Sam3.Sam3Segmenter
+   Constructor Void .ctor(OnnxSharp.Sam3.Sam3Options)
+   Method OnnxSharp.Sam3.Sam3Options get_Options()
+   Property OnnxSharp.Sam3.Sam3Options Options
+   Method OnnxSharp.Sam3.Sam3Result Segment(System.ReadOnlySpan`1[System.Byte], Int32, Int32, System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Sam3.Sam3Box], Boolean, Int32)
+== OnnxSharp.Speech.FbankExtractor
+   Constructor Void .ctor(OnnxSharp.Speech.FbankOptions)
+   Method Single[] Compute(System.ReadOnlySpan`1[System.Single], Int32 ByRef)
+   Property Int32 Dimension
+   Method Int32 FrameCount(Int32)
+   Method Int32 get_Dimension()
+   Method OnnxSharp.Speech.FbankOptions get_Options()
+   Property OnnxSharp.Speech.FbankOptions Options
+== OnnxSharp.Speech.FbankOptions
+   Constructor Void .ctor()
+   Property Double Dither
+   Property Int32 FftBins
+   Property Int32 FftSize
+   Property Int32 FrameLength
+   Property Double FrameLengthMilliseconds
+   Property Int32 FrameShift
+   Property Double FrameShiftMilliseconds
+   Method Double get_Dither()
+   Method Int32 get_FftBins()
+   Method Int32 get_FftSize()
+   Method Int32 get_FrameLength()
+   Method Double get_FrameLengthMilliseconds()
+   Method Int32 get_FrameShift()
+   Method Double get_FrameShiftMilliseconds()
+   Method Double get_HighFrequency()
+   Method Double get_LowFrequency()
+   Method Int32 get_MelBins()
+   Method Double get_PreemphasisCoefficient()
+   Method Boolean get_RemoveDcOffset()
+   Method Double get_ResolvedHighFrequency()
+   Method Int32 get_SampleRate()
+   Method Boolean get_SnipEdges()
+   Method Boolean get_UseEnergy()
+   Method Boolean get_UseLogFbank()
+   Method System.String get_WindowType()
+   Property Double HighFrequency
+   Property Double LowFrequency
+   Property Int32 MelBins
+   Property Double PreemphasisCoefficient
+   Property Boolean RemoveDcOffset
+   Property Double ResolvedHighFrequency
+   Property Int32 SampleRate
+   Method Void set_Dither(Double)
+   Method Void set_FrameLengthMilliseconds(Double)
+   Method Void set_FrameShiftMilliseconds(Double)
+   Method Void set_HighFrequency(Double)
+   Method Void set_LowFrequency(Double)
+   Method Void set_MelBins(Int32)
+   Method Void set_PreemphasisCoefficient(Double)
+   Method Void set_RemoveDcOffset(Boolean)
+   Method Void set_SampleRate(Int32)
+   Method Void set_SnipEdges(Boolean)
+   Method Void set_UseEnergy(Boolean)
+   Method Void set_UseLogFbank(Boolean)
+   Method Void set_WindowType(System.String)
+   Property Boolean SnipEdges
+   Property Boolean UseEnergy
+   Property Boolean UseLogFbank
+   Property System.String WindowType
+== OnnxSharp.Speech.FeatureMatrix
+   Property Int32 Dim
+   Property Int32 Frames
+   Method Int32 get_Dim()
+   Method Int32 get_Frames()
+   Method Single[] get_Values()
+   Method Void set_Dim(Int32)
+   Method Void set_Frames(Int32)
+   Method Void set_Values(Single[])
+   Property Single[] Values
+== OnnxSharp.Speech.LfrCmvn
+   Constructor Void .ctor()
+   Property Single[] Additive
+   Method Single[] Apply(System.ReadOnlySpan`1[System.Single], Int32, Int32, Int32 ByRef)
+   Method Int32 FrameCount(Int32)
+   Method Single[] get_Additive()
+   Method Single[] get_Scale()
+   Method Int32 get_WindowShift()
+   Method Int32 get_WindowSize()
+   Property Single[] Scale
+   Method Void set_Additive(Single[])
+   Method Void set_Scale(Single[])
+   Method Void set_WindowShift(Int32)
+   Method Void set_WindowSize(Int32)
+   Property Int32 WindowShift
+   Property Int32 WindowSize
+== OnnxSharp.Speech.Paraformer.CifResult
+   Constructor Void .ctor()
+   Property Single[] Candidates
+   Property Int32 Dim
+   Property Single[] FireAlphas
+   Property Int32[] FireIndices
+   Method Single[] get_Candidates()
+   Method Int32 get_Dim()
+   Method Single[] get_FireAlphas()
+   Method Int32[] get_FireIndices()
+   Method Single get_LeftoverAlpha()
+   Method Single[] get_LeftoverFrame()
+   Method Int32 get_TokenCount()
+   Method Single[] get_Tokens()
+   Property Single LeftoverAlpha
+   Property Single[] LeftoverFrame
+   Method Void set_Candidates(Single[])
+   Method Void set_Dim(Int32)
+   Method Void set_FireAlphas(Single[])
+   Method Void set_FireIndices(Int32[])
+   Method Void set_LeftoverAlpha(Single)
+   Method Void set_LeftoverFrame(Single[])
+   Method Void set_TokenCount(Int32)
+   Method Void set_Tokens(Single[])
+   Property Int32 TokenCount
+   Property Single[] Tokens
+== OnnxSharp.Speech.Paraformer.ContinuousIntegrateAndFire
+   Constructor Void .ctor()
+   Method Single get_Threshold()
+   Method OnnxSharp.Speech.Paraformer.CifResult Process(System.ReadOnlySpan`1[System.Single], Int32, Int32, System.ReadOnlySpan`1[System.Single])
+   Method Void set_Threshold(Single)
+   Property Single Threshold
+== OnnxSharp.Speech.Paraformer.ParaformerOptions
+   Constructor Void .ctor()
+   Property System.String AlphaOutput
+   Property System.String DecoderPath
+   Property System.String EncoderOutput
+   Property System.String EncoderPath
+   Property System.String EncoderQuantizedOutput
+   Property System.String EncoderScaleOutput
+   Property System.String EncoderZeroPointOutput
+   Method System.String get_AlphaOutput()
+   Method System.String get_DecoderPath()
+   Method System.String get_EncoderOutput()
+   Method System.String get_EncoderPath()
+   Method System.String get_EncoderQuantizedOutput()
+   Method System.String get_EncoderScaleOutput()
+   Method System.String get_EncoderZeroPointOutput()
+   Method Int32 get_GraphCacheSize()
+   Method System.String get_LogitsOutput()
+   Method System.String get_MaxLabelLengthInput()
+   Method System.String get_MemoryInput()
+   Method System.String get_TokenNumInput()
+   Method System.String get_TokensPath()
+   Property Int32 GraphCacheSize
+   Property System.String LogitsOutput
+   Property System.String MaxLabelLengthInput
+   Property System.String MemoryInput
+   Method Void set_AlphaOutput(System.String)
+   Method Void set_DecoderPath(System.String)
+   Method Void set_EncoderOutput(System.String)
+   Method Void set_EncoderPath(System.String)
+   Method Void set_EncoderQuantizedOutput(System.String)
+   Method Void set_EncoderScaleOutput(System.String)
+   Method Void set_EncoderZeroPointOutput(System.String)
+   Method Void set_GraphCacheSize(Int32)
+   Method Void set_LogitsOutput(System.String)
+   Method Void set_MaxLabelLengthInput(System.String)
+   Method Void set_MemoryInput(System.String)
+   Method Void set_TokenNumInput(System.String)
+   Method Void set_TokensPath(System.String)
+   Property System.String TokenNumInput
+   Property System.String TokensPath
+== OnnxSharp.Speech.Paraformer.ParaformerRecognizer
+   Constructor Void .ctor(OnnxSharp.Speech.Paraformer.ParaformerOptions)
+   Method OnnxSharp.Speech.Paraformer.RecognitionResult Transcribe(System.ReadOnlySpan`1[System.Single])
+   Method OnnxSharp.Speech.Paraformer.RecognitionResult TranscribeWav(System.String)
+== OnnxSharp.Speech.Paraformer.RecognitionResult
+   Constructor Void .ctor()
+   Property Double DecoderLoadMs
+   Property Double DecoderMs
+   Property Double EncoderLoadMs
+   Property Double EncoderMs
+   Property Int32 FeatureFrames
+   Property Double FeatureMs
+   Method Double get_DecoderLoadMs()
+   Method Double get_DecoderMs()
+   Method Double get_EncoderLoadMs()
+   Method Double get_EncoderMs()
+   Method Int32 get_FeatureFrames()
+   Method Double get_FeatureMs()
+   Method System.String get_Text()
+   Method Int32 get_TokenCount()
+   Method System.Collections.Generic.IReadOnlyList`1[System.Int32] get_TokenIds()
+   Method Double get_TotalMs()
+   Method Void set_DecoderLoadMs(Double)
+   Method Void set_DecoderMs(Double)
+   Method Void set_EncoderLoadMs(Double)
+   Method Void set_EncoderMs(Double)
+   Method Void set_FeatureFrames(Int32)
+   Method Void set_FeatureMs(Double)
+   Method Void set_Text(System.String)
+   Method Void set_TokenCount(Int32)
+   Method Void set_TokenIds(System.Collections.Generic.IReadOnlyList`1[System.Int32])
+   Property System.String Text
+   Property Int32 TokenCount
+   Property System.Collections.Generic.IReadOnlyList`1[System.Int32] TokenIds
+   Method System.String ToString()
+   Property Double TotalMs
+== OnnxSharp.Speech.SpeechFeatureExtractor
+   Constructor Void .ctor(OnnxSharp.Speech.SpeechFeatureOptions)
+   Method OnnxSharp.Speech.FeatureMatrix Compute(System.ReadOnlySpan`1[System.Single])
+   Method OnnxSharp.Speech.FeatureMatrix ComputeFromWav(System.String)
+   Method OnnxSharp.Speech.SpeechFeatureExtractor FromMetadata(System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.String], OnnxSharp.Speech.FbankOptions)
+   Method OnnxSharp.Speech.SpeechFeatureExtractor FromModel(System.String, OnnxSharp.Speech.FbankOptions)
+== OnnxSharp.Speech.SpeechFeatureOptions
+   Constructor Void .ctor()
+   Property OnnxSharp.Speech.FbankOptions Fbank
+   Method OnnxSharp.Speech.FbankOptions get_Fbank()
+   Method Single[] get_InvStdDev()
+   Method Int32 get_LfrWindowShift()
+   Method Int32 get_LfrWindowSize()
+   Method Single[] get_NegMean()
+   Property Single[] InvStdDev
+   Property Int32 LfrWindowShift
+   Property Int32 LfrWindowSize
+   Property Single[] NegMean
+   Method Void set_Fbank(OnnxSharp.Speech.FbankOptions)
+   Method Void set_InvStdDev(Single[])
+   Method Void set_LfrWindowShift(Int32)
+   Method Void set_LfrWindowSize(Int32)
+   Method Void set_NegMean(Single[])
+== OnnxSharp.Speech.TokenTable
+   Field Int32 BlankId
+   Property Int32 Count
+   Method System.Collections.Generic.List`1[System.Int32] DecodeIds(System.ReadOnlySpan`1[System.Int64], Int32)
+   Field Int32 EosId
+   Method Int32 get_Count()
+   Method System.String get_Item(Int32)
+   Property System.String Item [Int32]
+   Method OnnxSharp.Speech.TokenTable Load(System.String)
+   Field Int32 SosId
+   Method System.String ToText(System.Collections.Generic.IReadOnlyList`1[System.Int32])
+== OnnxSharp.Speech.WavReader
+   Method System.ValueTuple`2[System.Single[],System.Int32] Read(System.String)
+== OnnxSharp.Tensors.BinaryOpKind
+   Field OnnxSharp.Tensors.BinaryOpKind Add
+   Field OnnxSharp.Tensors.BinaryOpKind Div
+   Field OnnxSharp.Tensors.BinaryOpKind Max
+   Field OnnxSharp.Tensors.BinaryOpKind Min
+   Field OnnxSharp.Tensors.BinaryOpKind Mod
+   Field OnnxSharp.Tensors.BinaryOpKind Mul
+   Field OnnxSharp.Tensors.BinaryOpKind Pow
+   Field OnnxSharp.Tensors.BinaryOpKind Sub
+   Field Int32 value__
+== OnnxSharp.Tensors.CastKernel
+   Method Boolean TryCast(OnnxSharp.Tensors.Tensor, OnnxSharp.Tensors.Tensor)
+== OnnxSharp.Tensors.DType
+   Field OnnxSharp.Tensors.DType Bool
+   Field OnnxSharp.Tensors.DType F16
+   Field OnnxSharp.Tensors.DType F32
+   Field OnnxSharp.Tensors.DType I32
+   Field OnnxSharp.Tensors.DType I64
+   Field OnnxSharp.Tensors.DType I8
+   Field OnnxSharp.Tensors.DType Invalid
+   Field OnnxSharp.Tensors.DType U8
+   Field Byte value__
+== OnnxSharp.Tensors.DTypeExtensions
+   Method Boolean IsFloat(OnnxSharp.Tensors.DType)
+   Method Boolean IsInteger(OnnxSharp.Tensors.DType)
+   Method Int32 SizeOf(OnnxSharp.Tensors.DType)
+== OnnxSharp.Tensors.Layout
+   Field OnnxSharp.Tensors.Layout NCHW
+   Field OnnxSharp.Tensors.Layout NCHWc16
+   Field Int32 value__
+== OnnxSharp.Tensors.QuantizationParams
+   Constructor Void .ctor(Single, Int32)
+   Constructor Void .ctor(System.ReadOnlySpan`1[System.Single], System.ReadOnlySpan`1[System.Int32])
+   Method Boolean get_IsEmpty()
+   Method Int32 get_Length()
+   Property Boolean IsEmpty
+   Property Int32 Length
+   Method Single Scale(Int32)
+   Method Int32 ZeroPoint(Int32)
+== OnnxSharp.Tensors.Quantizer
+   Method Void DequantizeInt8(System.ReadOnlySpan`1[System.SByte], System.Span`1[System.Single], Single, Int32)
+   Method Void DequantizeUInt8(System.ReadOnlySpan`1[System.Byte], System.Span`1[System.Single], Single, Int32)
+   Method System.ValueTuple`2[System.Single,System.Single] MinMax(System.ReadOnlySpan`1[System.Single])
+   Method Void QuantizeToInt8(System.ReadOnlySpan`1[System.Single], System.Span`1[System.SByte], Single, Int32)
+   Method Void QuantizeToUInt8(System.ReadOnlySpan`1[System.Single], System.Span`1[System.Byte], Single, Int32)
+== OnnxSharp.Tensors.Tensor
+   Constructor Void .ctor()
+   Field Int32 Alignment
+   Method OnnxSharp.Tensors.Tensor Allocate(OnnxSharp.Tensors.TensorShape, OnnxSharp.Tensors.DType)
+   Method System.ReadOnlySpan`1[T] AsReadOnlySpan[T]()
+   Method System.Span`1[T] AsSpan[T]()
+   Property Byte[] Buffer
+   Property Int32 ByteLength
+   Property Int32 ByteOffset
+   Method System.Span`1[System.Byte] Bytes()
+   Method OnnxSharp.Tensors.Tensor Clone()
+   Property Int64 Count
+   Property OnnxSharp.Tensors.DType DType
+   Method Void Fit(OnnxSharp.Tensors.TensorShape, OnnxSharp.Tensors.DType, Boolean)
+   Method OnnxSharp.Tensors.Tensor FromArray(System.ReadOnlySpan`1[System.Single], System.Nullable`1[OnnxSharp.Tensors.TensorShape])
+   Method OnnxSharp.Tensors.Tensor FromInt64(System.ReadOnlySpan`1[System.Int64], System.Nullable`1[OnnxSharp.Tensors.TensorShape])
+   Method Byte[] get_Buffer()
+   Method Int32 get_ByteLength()
+   Method Int32 get_ByteOffset()
+   Method Int64 get_Count()
+   Method OnnxSharp.Tensors.DType get_DType()
+   Method Boolean get_IsContiguous()
+   Method OnnxSharp.Tensors.Layout get_Layout()
+   Method OnnxSharp.Tensors.TensorShape get_Shape()
+   Method Int32[] get_Strides()
+   Property Boolean IsContiguous
+   Property OnnxSharp.Tensors.Layout Layout
+   Method Void SetLayout(OnnxSharp.Tensors.Layout)
+   Property OnnxSharp.Tensors.TensorShape Shape
+   Property Int32[] Strides
+   Method System.String ToString()
+== OnnxSharp.Tensors.TensorOps
+   Method OnnxSharp.Tensors.TensorShape BroadcastShape(OnnxSharp.Tensors.TensorShape, OnnxSharp.Tensors.TensorShape)
+   Method Void ElementWiseBinary(OnnxSharp.Tensors.BinaryOpKind, OnnxSharp.Tensors.Tensor, OnnxSharp.Tensors.Tensor, OnnxSharp.Tensors.Tensor)
+   Method Void ElementWiseUnary(OnnxSharp.Tensors.UnaryOpKind, OnnxSharp.Tensors.Tensor, OnnxSharp.Tensors.Tensor)
+   Method Single Erf(Single)
+== OnnxSharp.Tensors.TensorShape
+   Constructor Void .ctor(Int32[])
+   Property System.ReadOnlySpan`1[System.Int32] Dims
+   Method Boolean Equals(OnnxSharp.Tensors.TensorShape)
+   Method Boolean Equals(System.Object)
+   Method System.ReadOnlySpan`1[System.Int32] get_Dims()
+   Method Boolean get_IsScalar()
+   Method Int32 get_Item(Int32)
+   Method Int32 get_Rank()
+   Method OnnxSharp.Tensors.TensorShape get_Scalar()
+   Method Int32 GetHashCode()
+   Property Boolean IsScalar
+   Property Int32 Item [Int32]
+   Method Boolean op_Equality(OnnxSharp.Tensors.TensorShape, OnnxSharp.Tensors.TensorShape)
+   Method Boolean op_Inequality(OnnxSharp.Tensors.TensorShape, OnnxSharp.Tensors.TensorShape)
+   Property Int32 Rank
+   Property OnnxSharp.Tensors.TensorShape Scalar
+   Method Int32[] ToArray()
+   Method System.String ToString()
+   Method Int64 Total()
+   Method OnnxSharp.Tensors.TensorShape With(Int32, Int32)
+== OnnxSharp.Tensors.UnaryOpKind
+   Field OnnxSharp.Tensors.UnaryOpKind Abs
+   Field OnnxSharp.Tensors.UnaryOpKind Ceil
+   Field OnnxSharp.Tensors.UnaryOpKind Cos
+   Field OnnxSharp.Tensors.UnaryOpKind Erf
+   Field OnnxSharp.Tensors.UnaryOpKind Exp
+   Field OnnxSharp.Tensors.UnaryOpKind Floor
+   Field OnnxSharp.Tensors.UnaryOpKind Log
+   Field OnnxSharp.Tensors.UnaryOpKind Neg
+   Field OnnxSharp.Tensors.UnaryOpKind Reciprocal
+   Field OnnxSharp.Tensors.UnaryOpKind Relu
+   Field OnnxSharp.Tensors.UnaryOpKind Round
+   Field OnnxSharp.Tensors.UnaryOpKind Sigmoid
+   Field OnnxSharp.Tensors.UnaryOpKind Sign
+   Field OnnxSharp.Tensors.UnaryOpKind Silu
+   Field OnnxSharp.Tensors.UnaryOpKind Sin
+   Field OnnxSharp.Tensors.UnaryOpKind Sqrt
+   Field OnnxSharp.Tensors.UnaryOpKind Tanh
+   Field Int32 value__
+== OnnxSharp.Threading.ParallelRange
+   Method Void For(Int32, System.Action`2[System.Int32,System.Int32])
+   Method Void ForEach(Int32, System.Action`1[System.Int32])
+   Method Int32 get_MaxDegreeOfParallelism()
+   Method Int32 get_Threads()
+   Property Int32 MaxDegreeOfParallelism
+   Field Int64 SerialThreshold
+   Method Void set_MaxDegreeOfParallelism(Int32)
+   Property Int32 Threads
+== OnnxSharp.Vision.ChannelNormalization
+   Constructor Void .ctor(Single, Single, Single, Single, Single, Single)
+   Method Void Deconstruct(Single ByRef, Single ByRef, Single ByRef, Single ByRef, Single ByRef, Single ByRef)
+   Property OnnxSharp.Vision.ChannelNormalization Divide255
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Vision.ChannelNormalization)
+   Method OnnxSharp.Vision.ChannelNormalization get_Divide255()
+   Method OnnxSharp.Vision.ChannelNormalization get_ImageNet()
+   Method Single get_MeanB()
+   Method Single get_MeanG()
+   Method Single get_MeanR()
+   Method Single get_StdB()
+   Method Single get_StdG()
+   Method Single get_StdR()
+   Method Int32 GetHashCode()
+   Property OnnxSharp.Vision.ChannelNormalization ImageNet
+   Method Single Mean(Int32)
+   Property Single MeanB
+   Property Single MeanG
+   Property Single MeanR
+   Method Boolean op_Equality(OnnxSharp.Vision.ChannelNormalization, OnnxSharp.Vision.ChannelNormalization)
+   Method Boolean op_Inequality(OnnxSharp.Vision.ChannelNormalization, OnnxSharp.Vision.ChannelNormalization)
+   Method Void set_MeanB(Single)
+   Method Void set_MeanG(Single)
+   Method Void set_MeanR(Single)
+   Method Void set_StdB(Single)
+   Method Void set_StdG(Single)
+   Method Void set_StdR(Single)
+   Method Single Std(Int32)
+   Property Single StdB
+   Property Single StdG
+   Property Single StdR
+   Method System.String ToString()
+== OnnxSharp.Vision.CocoLabels
+   Field Int32 Count
+   Field Int32 DetectionFields
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] get_Names()
+   Method System.String LabelOf(Int32)
+   Method System.String NameOf(Int32)
+   Property System.Collections.Generic.IReadOnlyList`1[System.String] Names
+== OnnxSharp.Vision.Detection
+   Constructor Void .ctor(Int32, Single, Single, Single, Single, Single)
+   Property Single Area
+   Property Single Bottom
+   Property Int32 ClassId
+   Method Void Deconstruct(Int32 ByRef, Single ByRef, Single ByRef, Single ByRef, Single ByRef, Single ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Vision.Detection)
+   Method Single get_Area()
+   Method Single get_Bottom()
+   Method Int32 get_ClassId()
+   Method Single get_Height()
+   Method System.String get_Label()
+   Method System.String get_Name()
+   Method Single get_Right()
+   Method Single get_Score()
+   Method Single get_Width()
+   Method Single get_X()
+   Method Single get_Y()
+   Method Int32 GetHashCode()
+   Property Single Height
+   Method Single IoU(OnnxSharp.Vision.Detection ByRef, OnnxSharp.Vision.Detection ByRef)
+   Property System.String Label
+   Property System.String Name
+   Method Boolean op_Equality(OnnxSharp.Vision.Detection, OnnxSharp.Vision.Detection)
+   Method Boolean op_Inequality(OnnxSharp.Vision.Detection, OnnxSharp.Vision.Detection)
+   Property Single Right
+   Property Single Score
+   Method Void set_ClassId(Int32)
+   Method Void set_Height(Single)
+   Method Void set_Name(System.String)
+   Method Void set_Score(Single)
+   Method Void set_Width(Single)
+   Method Void set_X(Single)
+   Method Void set_Y(Single)
+   Method System.String ToString()
+   Property Single Width
+   Property Single X
+   Property Single Y
+== OnnxSharp.Vision.DetectionNms
+   Method System.Collections.Generic.List`1[OnnxSharp.Vision.Detection] Suppress(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Detection], Single, Int32, Boolean)
+== OnnxSharp.Vision.DetectorOptions
+   Constructor Void .ctor()
+   Property Boolean ClassAgnosticNms
+   Property Int32 ClassCount
+   Property Single Confidence
+   Method Boolean get_ClassAgnosticNms()
+   Method Int32 get_ClassCount()
+   Method Single get_Confidence()
+   Method Single get_IouThreshold()
+   Method OnnxSharp.Vision.OutputLayout get_Layout()
+   Method Int32 get_MaxCandidates()
+   Method Int32 get_MaxDetections()
+   Method Int32 get_TargetHeight()
+   Method Int32 get_TargetWidth()
+   Property Single IouThreshold
+   Property OnnxSharp.Vision.OutputLayout Layout
+   Property Int32 MaxCandidates
+   Property Int32 MaxDetections
+   Method Void set_ClassAgnosticNms(Boolean)
+   Method Void set_ClassCount(Int32)
+   Method Void set_Confidence(Single)
+   Method Void set_IouThreshold(Single)
+   Method Void set_Layout(OnnxSharp.Vision.OutputLayout)
+   Method Void set_MaxCandidates(Int32)
+   Method Void set_MaxDetections(Int32)
+   Method Void set_TargetHeight(Int32)
+   Method Void set_TargetWidth(Int32)
+   Property Int32 TargetHeight
+   Property Int32 TargetWidth
+== OnnxSharp.Vision.Face
+   Constructor Void .ctor(Single, Single, Single, Single, Single, OnnxSharp.Vision.FaceLandmarks)
+   Property Single Area
+   Property Single Bottom
+   Method Void Deconstruct(Single ByRef, Single ByRef, Single ByRef, Single ByRef, Single ByRef, OnnxSharp.Vision.FaceLandmarks ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Vision.Face)
+   Method Single get_Area()
+   Method Single get_Bottom()
+   Method Single get_Height()
+   Method OnnxSharp.Vision.FaceLandmarks get_Landmarks()
+   Method Single get_Right()
+   Method Single get_Score()
+   Method Single get_Width()
+   Method Single get_X()
+   Method Single get_Y()
+   Method Int32 GetHashCode()
+   Property Single Height
+   Method Single IoU(OnnxSharp.Vision.Face ByRef, OnnxSharp.Vision.Face ByRef)
+   Property OnnxSharp.Vision.FaceLandmarks Landmarks
+   Method Boolean op_Equality(OnnxSharp.Vision.Face, OnnxSharp.Vision.Face)
+   Method Boolean op_Inequality(OnnxSharp.Vision.Face, OnnxSharp.Vision.Face)
+   Property Single Right
+   Property Single Score
+   Method Void set_Height(Single)
+   Method Void set_Landmarks(OnnxSharp.Vision.FaceLandmarks)
+   Method Void set_Score(Single)
+   Method Void set_Width(Single)
+   Method Void set_X(Single)
+   Method Void set_Y(Single)
+   Method System.String ToString()
+   Property Single Width
+   Property Single X
+   Property Single Y
+== OnnxSharp.Vision.FaceDetectorOptions
+   Constructor Void .ctor()
+   Method Single get_IouThreshold()
+   Method Int32 get_MaxFaces()
+   Method Single get_ScoreThreshold()
+   Method Int32 get_TopK()
+   Property Single IouThreshold
+   Property Int32 MaxFaces
+   Property Single ScoreThreshold
+   Method Void set_IouThreshold(Single)
+   Method Void set_MaxFaces(Int32)
+   Method Void set_ScoreThreshold(Single)
+   Method Void set_TopK(Int32)
+   Property Int32 TopK
+== OnnxSharp.Vision.FaceLandmarks
+   Constructor Void .ctor(OnnxSharp.Vision.FacePoint, OnnxSharp.Vision.FacePoint, OnnxSharp.Vision.FacePoint, OnnxSharp.Vision.FacePoint, OnnxSharp.Vision.FacePoint)
+   Method Void Deconstruct(OnnxSharp.Vision.FacePoint ByRef, OnnxSharp.Vision.FacePoint ByRef, OnnxSharp.Vision.FacePoint ByRef, OnnxSharp.Vision.FacePoint ByRef, OnnxSharp.Vision.FacePoint ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Vision.FaceLandmarks)
+   Method OnnxSharp.Vision.FacePoint get_LeftEye()
+   Method OnnxSharp.Vision.FacePoint get_LeftMouth()
+   Method OnnxSharp.Vision.FacePoint get_Nose()
+   Method OnnxSharp.Vision.FacePoint get_RightEye()
+   Method OnnxSharp.Vision.FacePoint get_RightMouth()
+   Method Int32 GetHashCode()
+   Property OnnxSharp.Vision.FacePoint LeftEye
+   Property OnnxSharp.Vision.FacePoint LeftMouth
+   Property OnnxSharp.Vision.FacePoint Nose
+   Method Boolean op_Equality(OnnxSharp.Vision.FaceLandmarks, OnnxSharp.Vision.FaceLandmarks)
+   Method Boolean op_Inequality(OnnxSharp.Vision.FaceLandmarks, OnnxSharp.Vision.FaceLandmarks)
+   Property OnnxSharp.Vision.FacePoint RightEye
+   Property OnnxSharp.Vision.FacePoint RightMouth
+   Method Void set_LeftEye(OnnxSharp.Vision.FacePoint)
+   Method Void set_LeftMouth(OnnxSharp.Vision.FacePoint)
+   Method Void set_Nose(OnnxSharp.Vision.FacePoint)
+   Method Void set_RightEye(OnnxSharp.Vision.FacePoint)
+   Method Void set_RightMouth(OnnxSharp.Vision.FacePoint)
+   Method System.String ToString()
+== OnnxSharp.Vision.FacePoint
+   Constructor Void .ctor(Single, Single)
+   Method Void Deconstruct(Single ByRef, Single ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Vision.FacePoint)
+   Method Single get_X()
+   Method Single get_Y()
+   Method Int32 GetHashCode()
+   Method Boolean op_Equality(OnnxSharp.Vision.FacePoint, OnnxSharp.Vision.FacePoint)
+   Method Boolean op_Inequality(OnnxSharp.Vision.FacePoint, OnnxSharp.Vision.FacePoint)
+   Method Void set_X(Single)
+   Method Void set_Y(Single)
+   Method System.String ToString()
+   Property Single X
+   Property Single Y
+== OnnxSharp.Vision.ImagePreprocessor
+   Method System.ValueTuple`2[OnnxSharp.Tensors.Tensor,OnnxSharp.Vision.Letterbox] Letterbox(System.ReadOnlySpan`1[System.Byte], Int32, Int32, Int32, Int32, Boolean, Int32)
+   Field Byte PadValue
+   Method OnnxSharp.Tensors.Tensor Stretch(System.ReadOnlySpan`1[System.Byte], Int32, Int32, Int32, Int32, Boolean, Int32, System.Nullable`1[OnnxSharp.Vision.ChannelNormalization])
+== OnnxSharp.Vision.Letterbox
+   Constructor Void .ctor(Int32, Int32, Int32, Int32, Single, Single, Int32, Int32)
+   Method Void Deconstruct(Int32 ByRef, Int32 ByRef, Int32 ByRef, Int32 ByRef, Single ByRef, Single ByRef, Int32 ByRef, Int32 ByRef)
+   Method Boolean Equals(System.Object)
+   Method Boolean Equals(OnnxSharp.Vision.Letterbox)
+   Method Int32 get_PadX()
+   Method Int32 get_PadY()
+   Method Single get_ScaleX()
+   Method Single get_ScaleY()
+   Method Int32 get_SourceHeight()
+   Method Int32 get_SourceWidth()
+   Method Int32 get_TargetHeight()
+   Method Int32 get_TargetWidth()
+   Method Int32 GetHashCode()
+   Method Boolean op_Equality(OnnxSharp.Vision.Letterbox, OnnxSharp.Vision.Letterbox)
+   Method Boolean op_Inequality(OnnxSharp.Vision.Letterbox, OnnxSharp.Vision.Letterbox)
+   Property Int32 PadX
+   Property Int32 PadY
+   Property Single ScaleX
+   Property Single ScaleY
+   Method Void set_PadX(Int32)
+   Method Void set_PadY(Int32)
+   Method Void set_ScaleX(Single)
+   Method Void set_ScaleY(Single)
+   Method Void set_SourceHeight(Int32)
+   Method Void set_SourceWidth(Int32)
+   Method Void set_TargetHeight(Int32)
+   Method Void set_TargetWidth(Int32)
+   Property Int32 SourceHeight
+   Property Int32 SourceWidth
+   Property Int32 TargetHeight
+   Property Int32 TargetWidth
+   Method Single ToSourceX(Single)
+   Method Single ToSourceY(Single)
+   Method System.String ToString()
+== OnnxSharp.Vision.OutputLayout
+   Field OnnxSharp.Vision.OutputLayout Auto
+   Field OnnxSharp.Vision.OutputLayout ChannelsFirst
+   Field OnnxSharp.Vision.OutputLayout ChannelsLast
+   Field OnnxSharp.Vision.OutputLayout EndToEnd
+   Field Int32 value__
+== OnnxSharp.Vision.RfDetrDecoder
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Detection] Decode(OnnxSharp.Tensors.Tensor, OnnxSharp.Tensors.Tensor, Int32, Int32, OnnxSharp.Vision.RfDetrOptions)
+== OnnxSharp.Vision.RfDetrDetector
+   Constructor Void .ctor(System.String, OnnxSharp.Vision.RfDetrOptions)
+   Constructor Void .ctor(OnnxSharp.Core.Net, OnnxSharp.Vision.RfDetrOptions)
+   Property System.String BoxesOutputName
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Detection] Decode(System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Tensors.Tensor], Int32, Int32)
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Detection] Decode(OnnxSharp.Tensors.Tensor, OnnxSharp.Tensors.Tensor, Int32, Int32)
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Detection] Detect(System.ReadOnlySpan`1[System.Byte], Int32, Int32, Boolean, Int32)
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Detection] Detect(OnnxSharp.Tensors.Tensor, Int32, Int32)
+   Method System.String get_BoxesOutputName()
+   Method System.String get_InputName()
+   Method System.String get_LogitsOutputName()
+   Method OnnxSharp.Core.Net get_Net()
+   Method OnnxSharp.Vision.RfDetrOptions get_Options()
+   Method Int32 get_TargetHeight()
+   Method Int32 get_TargetWidth()
+   Property System.String InputName
+   Property System.String LogitsOutputName
+   Property OnnxSharp.Core.Net Net
+   Property OnnxSharp.Vision.RfDetrOptions Options
+   Method OnnxSharp.Tensors.Tensor Preprocess(System.ReadOnlySpan`1[System.Byte], Int32, Int32, Boolean, Int32)
+   Property Int32 TargetHeight
+   Property Int32 TargetWidth
+== OnnxSharp.Vision.RfDetrOptions
+   Constructor Void .ctor()
+   Property System.Nullable`1[System.Int32] BackgroundClassId
+   Property Single Confidence
+   Method System.Nullable`1[System.Int32] get_BackgroundClassId()
+   Method Single get_Confidence()
+   Method Int32 get_MaxDetections()
+   Method OnnxSharp.Vision.ChannelNormalization get_Normalization()
+   Method Int32 get_TargetHeight()
+   Method Int32 get_TargetWidth()
+   Property Int32 MaxDetections
+   Property OnnxSharp.Vision.ChannelNormalization Normalization
+   Method Void set_BackgroundClassId(System.Nullable`1[System.Int32])
+   Method Void set_Confidence(Single)
+   Method Void set_MaxDetections(Int32)
+   Method Void set_Normalization(OnnxSharp.Vision.ChannelNormalization)
+   Method Void set_TargetHeight(Int32)
+   Method Void set_TargetWidth(Int32)
+   Property Int32 TargetHeight
+   Property Int32 TargetWidth
+== OnnxSharp.Vision.YoloDecoder
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Detection] Decode(OnnxSharp.Tensors.Tensor, OnnxSharp.Vision.Letterbox ByRef, OnnxSharp.Vision.DetectorOptions, System.Collections.Generic.IReadOnlyList`1[System.String])
+== OnnxSharp.Vision.YoloDetector
+   Constructor Void .ctor(System.String, OnnxSharp.Vision.DetectorOptions)
+   Constructor Void .ctor(OnnxSharp.Core.Net, OnnxSharp.Vision.DetectorOptions)
+   Property System.Collections.Generic.IReadOnlyList`1[System.String] ClassNames
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Detection] Decode(OnnxSharp.Tensors.Tensor, OnnxSharp.Vision.Letterbox ByRef)
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Detection] Detect(System.ReadOnlySpan`1[System.Byte], Int32, Int32, Boolean, Int32)
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Detection] Detect(OnnxSharp.Tensors.Tensor, OnnxSharp.Vision.Letterbox ByRef)
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] get_ClassNames()
+   Method System.String get_InputName()
+   Method OnnxSharp.Tensors.TensorShape get_InputShape()
+   Method OnnxSharp.Vision.YoloMetadata get_Metadata()
+   Method OnnxSharp.Core.Net get_Net()
+   Method OnnxSharp.Vision.DetectorOptions get_Options()
+   Method Int32 get_TargetHeight()
+   Method Int32 get_TargetWidth()
+   Property System.String InputName
+   Property OnnxSharp.Tensors.TensorShape InputShape
+   Property OnnxSharp.Vision.YoloMetadata Metadata
+   Method System.String NameOf(Int32)
+   Property OnnxSharp.Core.Net Net
+   Property OnnxSharp.Vision.DetectorOptions Options
+   Method System.ValueTuple`2[OnnxSharp.Tensors.Tensor,OnnxSharp.Vision.Letterbox] Preprocess(System.ReadOnlySpan`1[System.Byte], Int32, Int32, Boolean, Int32)
+   Property Int32 TargetHeight
+   Property Int32 TargetWidth
+== OnnxSharp.Vision.YoloMetadata
+   Property Int32 Count
+   Property OnnxSharp.Vision.YoloMetadata Empty
+   Method Int32 get_Count()
+   Method OnnxSharp.Vision.YoloMetadata get_Empty()
+   Method System.Nullable`1[System.Int32] get_InputHeight()
+   Method System.Nullable`1[System.Int32] get_InputWidth()
+   Method System.Collections.Generic.IReadOnlyList`1[System.String] get_Names()
+   Property System.Nullable`1[System.Int32] InputHeight
+   Property System.Nullable`1[System.Int32] InputWidth
+   Method System.String LabelOf(Int32)
+   Method System.String NameOf(Int32)
+   Property System.Collections.Generic.IReadOnlyList`1[System.String] Names
+   Method OnnxSharp.Vision.YoloMetadata Parse(System.Collections.Generic.IReadOnlyDictionary`2[System.String,System.String])
+== OnnxSharp.Vision.YuNetDecoder
+   Method Void DecodeStride(System.ReadOnlySpan`1[System.Single], System.ReadOnlySpan`1[System.Single], System.ReadOnlySpan`1[System.Single], System.ReadOnlySpan`1[System.Single], Int32, Int32, Int32, Single, System.Collections.Generic.List`1[OnnxSharp.Vision.Face])
+   Method System.ReadOnlySpan`1[System.Int32] get_Strides()
+   Method System.Collections.Generic.List`1[OnnxSharp.Vision.Face] ScaleToImage(System.Collections.Generic.List`1[OnnxSharp.Vision.Face], Int32, Int32, Int32, Int32)
+   Property System.ReadOnlySpan`1[System.Int32] Strides
+   Method System.Collections.Generic.List`1[OnnxSharp.Vision.Face] Suppress(System.Collections.Generic.List`1[OnnxSharp.Vision.Face], Single, Int32)
+== OnnxSharp.Vision.YuNetDetector
+   Constructor Void .ctor(System.String, OnnxSharp.Vision.FaceDetectorOptions)
+   Constructor Void .ctor(OnnxSharp.Core.Net, OnnxSharp.Vision.FaceDetectorOptions)
+   Method OnnxSharp.Tensors.Tensor CreateInput(System.ReadOnlySpan`1[System.Byte], Int32, Int32, Boolean, Int32)
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Face] Detect(System.ReadOnlySpan`1[System.Byte], Int32, Int32, Boolean, Int32)
+   Method System.Collections.Generic.IReadOnlyList`1[OnnxSharp.Vision.Face] DetectFromTensor(OnnxSharp.Tensors.Tensor, Int32, Int32)
+   Method Int32 get_InputHeight()
+   Method Int32 get_InputWidth()
+   Method OnnxSharp.Core.Net get_Net()
+   Method OnnxSharp.Vision.FaceDetectorOptions get_Options()
+   Property Int32 InputHeight
+   Property Int32 InputWidth
+   Property OnnxSharp.Core.Net Net
+   Property OnnxSharp.Vision.FaceDetectorOptions Options

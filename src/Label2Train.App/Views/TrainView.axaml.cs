@@ -204,6 +204,21 @@ public partial class TrainView : UserControl
             return;
         }
 
+        // 选文件、读图、推理、弹窗都在里面：任何一步失败都要落到状态行与日志里，
+        // 不能只是「点了没反应」
+        try
+        {
+            await DetectAsync(viewModel, owner);
+        }
+        catch (Exception error)
+        {
+            viewModel.Report($"检测失败：{error.Message}");
+            BeanFactory.Resolve<ILoggerFactory>()?.CreateLogger<TrainView>().LogError(error, "检测失败");
+        }
+    }
+
+    private async Task DetectAsync(TrainViewModel viewModel, Window owner)
+    {
         AppSettings settings = BeanFactory.Require<AppSettings>();
         SettingsStore settingsStore = BeanFactory.Require<SettingsStore>();
 
@@ -232,7 +247,7 @@ public partial class TrainView : UserControl
 
             if (picked is null)
             {
-                viewModel.Status = "没有可用模型，检测取消";
+                viewModel.Report("没有可用模型，检测取消");
                 return;
             }
 
@@ -241,37 +256,30 @@ public partial class TrainView : UserControl
             SaveSettings(settingsStore, settings);
         }
 
-        try
-        {
-            viewModel.Status = "检测中…";
+        viewModel.Status = "检测中…";
 
-            using var runner = new YoloOnnxRunner(modelPath);
-            using var bitmap = new Bitmap(imagePath);
+        using var runner = new YoloOnnxRunner(modelPath);
+        using var bitmap = new Bitmap(imagePath);
 
-            byte[] bgra = BitmapPixels.ToBgra(bitmap, out int width, out int height);
+        byte[] bgra = BitmapPixels.ToBgra(bitmap, out int width, out int height);
 
-            var options = new AutoLabelOptions(
-                modelPath,
-                settings.AutoLabelConfidence,
-                ClassNames: viewModel.Classes.Count > 0 ? viewModel.Classes : null);
+        var options = new AutoLabelOptions(
+            modelPath,
+            settings.AutoLabelConfidence,
+            ClassNames: viewModel.Classes.Count > 0 ? viewModel.Classes : null);
 
-            IReadOnlyList<AutoLabelCandidate> candidates =
-                await Task.Run(() => runner.Predict(bgra, width, height, options));
+        IReadOnlyList<AutoLabelCandidate> candidates =
+            await Task.Run(() => runner.Predict(bgra, width, height, options));
 
-            viewModel.Status = $"检测完成：{candidates.Count} 个框";
+        viewModel.Status = $"检测完成：{candidates.Count} 个框";
 
-            var window = new DetectWindow(
-                bitmap,
-                candidates,
-                Path.GetFileName(imagePath),
-                Path.GetFileName(modelPath));
+        var window = new DetectWindow(
+            bitmap,
+            candidates,
+            Path.GetFileName(imagePath),
+            Path.GetFileName(modelPath));
 
-            await window.ShowDialog(owner);
-        }
-        catch (Exception error)
-        {
-            viewModel.Status = $"检测失败：{error.Message}";
-        }
+        await window.ShowDialog(owner);
     }
 
     private static void SaveSettings(SettingsStore settingsStore, AppSettings settings)
