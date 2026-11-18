@@ -389,7 +389,7 @@ public sealed class YoloDatasetTrainingRunner(
             ["loss"] = lossValue.ToString("G9", CultureInfo.InvariantCulture),
             ["map50"] = map50.ToString("G6", CultureInfo.InvariantCulture),
             ["map50-95"] = map95.ToString("G6", CultureInfo.InvariantCulture),
-            ["backend"] = device,
+            ["backend"] = DeviceFactory.Describe(device),
             ["classes"] = model.ClassCount.ToString(CultureInfo.InvariantCulture),
             ["image_size"] = imageSize.ToString(CultureInfo.InvariantCulture),
         };
@@ -408,7 +408,7 @@ public sealed class YoloDatasetTrainingRunner(
             dataset = store.Id,
             format = store.Format.ToId(),
             architecture = model.Architecture,
-            backend = options.Device,
+            backend = DeviceFactory.Describe(options.Device),
             classes = store.Classes.Names,
             epochs = options.Epochs,
             batchSize = options.BatchSize,

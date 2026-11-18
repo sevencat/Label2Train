@@ -17,7 +17,7 @@ namespace Label2Train.Core.Simulation;
 /// <param name="LearningRate">初始学习率。</param>
 /// <param name="Scale">模型规模（n / s / m / l / x）。</param>
 /// <param name="Family">模型家族（v8 / v11）。</param>
-/// <param name="Device">计算设备（cpu / cuda）。</param>
+/// <param name="Device">计算设备（cpu / cuda）；空表示用进程缺省设备（有 CUDA 就用 CUDA）。</param>
 public sealed record TrainingRunOptions(
     StorageLocation Output,
     IReadOnlyList<string>? Splits = null,
@@ -27,7 +27,7 @@ public sealed record TrainingRunOptions(
     float LearningRate = 0.01f,
     string Scale = "n",
     string Family = "v8",
-    string Device = "cpu")
+    string Device = "")
 {
     /// <summary>每轮进度回调（真训练引擎用；干跑忽略）。</summary>
     public IProgress<TrainingProgress>? Progress { get; init; }

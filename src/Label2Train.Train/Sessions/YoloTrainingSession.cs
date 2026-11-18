@@ -33,8 +33,8 @@ public sealed record YoloTrainingOptions
     /// <summary>模型家族（<c>v8</c> / <c>v11</c>）。</summary>
     public string Family { get; init; } = "v8";
 
-    /// <summary>计算设备。</summary>
-    public ComputeDevice Device { get; init; } = ComputeDevice.Cpu;
+    /// <summary>计算设备：缺省跟随进程探测结果（有 CUDA 就用 CUDA）。</summary>
+    public ComputeDevice Device { get; init; } = DeviceFactory.Default;
 
     /// <summary>输出目录（检查点与 train.json 写这里）。</summary>
     public string? OutputDirectory { get; init; }

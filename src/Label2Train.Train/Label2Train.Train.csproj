@@ -13,13 +13,13 @@
   <ItemGroup>
     <PackageReference Include="TorchSharp" />
     <!-- 按构建平台只引一份原生产物，避免 libtorch-cpu 把 linux-x64 / osx-arm64 的几 G 一起还原 -->
-    <PackageReference Include="libtorch-cpu-win-x64" Condition="$([MSBuild]::IsOSPlatform('Windows'))" />
     <PackageReference Include="libtorch-cpu-linux-x64" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />
     <PackageReference Include="libtorch-cpu-osx-arm64" Condition="$([MSBuild]::IsOSPlatform('OSX'))" />
     <!-- 只依赖 ImageFacade 抽象；后端（SkiaSharp）由 exe 入口注册 -->
     <PackageReference Include="Sevencat.ImageFacade" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="TorchSharp-cuda-windows" />
   </ItemGroup>
 
 </Project>

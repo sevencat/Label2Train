@@ -6,7 +6,7 @@ namespace Label2Train.Train.Core;
 /// <summary>可选计算设备。</summary>
 public enum ComputeDevice
 {
-    /// <summary>CPU（默认，任何机器可用）。</summary>
+    /// <summary>CPU（任何机器可用）。</summary>
     Cpu,
 
     /// <summary>CUDA（需要 libtorch-cuda 原生包 + NVIDIA 驱动）。</summary>
@@ -17,16 +17,31 @@ public enum ComputeDevice
 /// TorchSharp 设备选择与可用性检查。
 /// <para>
 /// TorchSharp / LibTorch 只有 CPU 与 CUDA 两种设备；本项目<b>不提供 Vulkan</b>。
-/// CUDA 不可用时直接抛错并给出安装指引，不做静默回退。
+/// 缺省设备在进程里只探测一次：CUDA 可用就用 CUDA，否则用 CPU（见 <see cref="Default"/>）。
+/// 显式指定 CUDA 但不可用时直接抛错并给出安装指引，不做静默回退。
 /// </para>
 /// </summary>
 public static class DeviceFactory
 {
-    /// <summary>解析命令行 / 配置里的设备名（cpu / cuda）。</summary>
+    private static readonly Lazy<ComputeDevice> LazyDefault = new(ProbeDefault, isThreadSafe: true);
+
+    /// <summary>
+    /// 进程缺省设备：CUDA 可用就是 CUDA，否则 CPU。第一次读取时探测并缓存，
+    /// 之后所有训练都读同一个结果——没有环境变量、没有配置项、也没有全局默认设备。
+    /// </summary>
+    public static ComputeDevice Default => LazyDefault.Value;
+
+    /// <summary>
+    /// 让探测在启动时就发生（早于窗口与训练线程），避免第一轮训练的日志里还得再等一次初始化。
+    /// 多次调用无副作用。
+    /// </summary>
+    public static void InitializeDefault() => _ = LazyDefault.Value;
+
+    /// <summary>解析设备名（cpu / cuda）；空值表示「用缺省设备」。</summary>
     public static ComputeDevice Parse(string? value)
     {
         if (string.IsNullOrWhiteSpace(value))
-            return ComputeDevice.Cpu;
+            return Default;
 
         return value.Trim().ToLowerInvariant() switch
         {
@@ -53,9 +68,6 @@ public static class DeviceFactory
         return torch.CUDA;
     }
 
-    /// <summary>设备是否可用（不抛异常）。</summary>
-    public static bool IsAvailable(ComputeDevice device) =>
-        device == ComputeDevice.Cpu || torch.cuda.is_available();
 
     /// <summary>人类可读描述（写进日志与检查点元数据）。</summary>
     public static string Describe(ComputeDevice device) => device switch
@@ -64,6 +76,9 @@ public static class DeviceFactory
         ComputeDevice.Cuda => "cuda",
         _ => device.ToString().ToLowerInvariant(),
     };
+
+    /// <summary>按名字描述；空值描述的是缺省设备。</summary>
+    public static string Describe(string? value) => Describe(Parse(value));
 
     /// <summary>设备详细信息（CUDA 时带设备名）。</summary>
     public static string DescribeDetailed(ComputeDevice device)
@@ -75,5 +90,23 @@ public static class DeviceFactory
             return "cuda (unavailable)";
 
         return $"cuda:0 (torch {torch.__version__})";
+    }
+
+    /// <summary>按名字给出详细信息；空值描述的是缺省设备。</summary>
+    public static string DescribeDetailed(string? value) => DescribeDetailed(Parse(value));
+
+    /// <summary>
+    /// 探测缺省设备：原生库加载失败、驱动异常都当成「这台机器没有 CUDA」，退回 CPU 而不是让程序起不来。
+    /// </summary>
+    private static ComputeDevice ProbeDefault()
+    {
+        try
+        {
+            return torch.cuda.is_available() ? ComputeDevice.Cuda : ComputeDevice.Cpu;
+        }
+        catch (Exception)
+        {
+            return ComputeDevice.Cpu;
+        }
     }
 }

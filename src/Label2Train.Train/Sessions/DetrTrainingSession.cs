@@ -60,8 +60,8 @@ public sealed record DetrTrainingOptions
     /// <summary>检测头的注意力头数。</summary>
     public int ModelHeads { get; init; } = 8;
 
-    /// <summary>计算设备。</summary>
-    public ComputeDevice Device { get; init; } = ComputeDevice.Cpu;
+    /// <summary>计算设备：缺省跟随进程探测结果（有 CUDA 就用 CUDA）。</summary>
+    public ComputeDevice Device { get; init; } = DeviceFactory.Default;
 
     /// <summary>输出目录。</summary>
     public string? OutputDirectory { get; init; }

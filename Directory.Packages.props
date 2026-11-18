@@ -16,6 +16,7 @@
     <PackageVersion Include="Material.Avalonia" Version="3.21.0" />
     <PackageVersion Include="Material.Icons.Avalonia" Version="3.0.2" />
     <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+    <PackageVersion Include="TorchSharp-cuda-windows" Version="0.107.0" />
   </ItemGroup>
   <ItemGroup Label="NativeAssets">
     <!-- SkiaSharp / HarfBuzzSharp 的非 Windows 原生资产：App 项目里用 ExcludeAssets 挡掉，版本须与传递依赖一致 -->
@@ -49,7 +50,6 @@
     <!-- 训练引擎：TorchSharp（LibTorch 绑定）+ 当前平台的原生包；CUDA 机器换 libtorch-cuda-12.8-win-x64 -->
     <PackageVersion Include="TorchSharp" Version="0.107.0" />
     <!-- 不用 libtorch-cpu 这个 meta 包：它会把 linux/osx 的原生产物一起拉下来 -->
-    <PackageVersion Include="libtorch-cpu-win-x64" Version="2.10.0" />
     <PackageVersion Include="libtorch-cpu-linux-x64" Version="2.10.0" />
     <PackageVersion Include="libtorch-cpu-osx-arm64" Version="2.10.0" />
   </ItemGroup>

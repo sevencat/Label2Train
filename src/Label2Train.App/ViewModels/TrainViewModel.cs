@@ -620,20 +620,21 @@ public partial class TrainViewModel : ObservableObject
 
         IProgress<string> log = new Progress<string>(AppendLog);
 
-        var options = new TrainingRunOptions(
-            StorageLocation.Parse(OutputDirectory),
-            Epochs: (int)Epochs,
-            BatchSize: (int)BatchSize,
-            ImageSize: (int)ImageSize,
-            Family: SelectedModel?.Id ?? "v8")
-        {
-            Progress = progress,
-            Log = message => log.Report(message),
-            Control = _control,
-        };
-
         try
         {
+            // 设备不在这里传：训练侧用 DeviceFactory.Default（启动时探测过，有 CUDA 就用 CUDA）
+            var options = new TrainingRunOptions(
+                StorageLocation.Parse(OutputDirectory),
+                Epochs: (int)Epochs,
+                BatchSize: (int)BatchSize,
+                ImageSize: (int)ImageSize,
+                Family: SelectedModel?.Id ?? "v8")
+            {
+                Progress = progress,
+                Log = message => log.Report(message),
+                Control = _control,
+            };
+
             TrainingRunSummary summary = await Task
                 .Run(() => _runner.TrainAsync(_store, options, _training.Token), _training.Token)
                 .ConfigureAwait(true);

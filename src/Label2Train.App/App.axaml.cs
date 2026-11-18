@@ -3,12 +3,11 @@ using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Label2Train.Core.Dataset.TinyLabel;
 using Label2Train.Core.Infrastructure;
 using Label2Train.Core.Localization;
 using Label2Train.Label;
 using Label2Train.Train;
-using Label2Train.App.ViewModels;
+using Label2Train.Train.Core;
 using Label2Train.App.Views;
 
 namespace Label2Train.App;
@@ -31,6 +30,10 @@ public partial class App : Application
 
         // 数据目录（库、日志都落这里）先定，再打开库：文件不在就当场建空库
         AppDataPaths.Initialize(startup.DataDirectory);
+
+        // 设备在启动时定一次：CUDA 可用就用 CUDA，否则 CPU。之后训练、检查点元数据都读这一个结果，
+        // 不设进程级默认设备、也不留配置开关。
+        DeviceFactory.InitializeDefault();
 
         ServiceProvider services = new ServiceCollection()
             // 参数已经解析过，直接用这一份注册：窗口与启动逻辑看到的是同一个对象，
