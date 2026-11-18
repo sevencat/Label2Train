@@ -1,0 +1,88 @@
+using System.Globalization;
+using Label2Train.Core.Dataset;
+using Label2Train.Core.Dataset.TinyLabel;
+using Label2Train.Core.Storage;
+
+namespace Label2Train.Label;
+
+/// <summary>项目里的一张图：所属 split + 内存样本（尺寸与框）。</summary>
+public sealed record ProjectImage(string Split, DatasetSample Sample)
+{
+    public string FileName => Sample.Image.FileName;
+
+    public int BoxCount => Sample.Boxes.Count;
+}
+
+/// <summary>打开后的项目快照：图片清单与类别，纯数据，不持有数据库连接。</summary>
+public sealed record OpenedProject(
+    long ProjectId,
+    StorageLocation Folder,
+    string ProjectName,
+    IReadOnlyList<string> Classes,
+    IReadOnlyList<string> Splits,
+    IReadOnlyList<ProjectImage> Images)
+{
+    public int BoxCount => Images.Sum(image => image.BoxCount);
+
+    public IReadOnlyList<ProjectImage> OfSplit(string split)
+        => [.. Images.Where(image => string.Equals(image.Split, split, StringComparison.OrdinalIgnoreCase))];
+}
+
+/// <summary>
+/// 打开「图片目录 + SQLite」项目并列出图片与标注。
+/// 只做数据装载：读完即关库，图片字节由界面通过 <c>ImageRef</c> 自行按需读取。
+/// </summary>
+public sealed class LabelProjectBrowser(DatasetStoreResolver resolver)
+{
+    /// <summary>
+    /// <paramref name="folder"/> 是数据目录（<c>label2train.db</c> 所在目录）。
+    /// 库里只有一个项目时可省略 <paramref name="projectId"/>；多个项目必须指定。
+    /// </summary>
+    public async Task<OpenedProject> OpenAsync(
+        string folder,
+        long? projectId = null,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folder);
+
+        DatasetOpenResult opened = await resolver
+            .OpenAsync(
+                StorageLocation.Parse(folder),
+                DatasetFormat.TinyLabelDb,
+                projectId?.ToString(CultureInfo.InvariantCulture),
+                ct)
+            .ConfigureAwait(false);
+
+        try
+        {
+            var images = new List<ProjectImage>();
+
+            foreach (string split in opened.Store.Splits)
+            {
+                IReadOnlyList<DatasetSample> samples = await opened.Store
+                    .OpenSplit(split)
+                    .LoadSamplesAsync(ct)
+                    .ConfigureAwait(false);
+
+                foreach (DatasetSample sample in samples)
+                {
+                    images.Add(new ProjectImage(split, sample));
+                }
+            }
+
+            var store = opened.Store as TinyLabelDatasetStore;
+
+            return new OpenedProject(
+                store?.ProjectId ?? projectId ?? 0,
+                opened.Store.Root,
+                store?.ProjectName ?? opened.Store.Id,
+                [.. opened.Store.Classes.Names],
+                [.. opened.Store.Splits],
+                images);
+        }
+        finally
+        {
+            (opened.Store as IDisposable)?.Dispose();
+        }
+    }
+}

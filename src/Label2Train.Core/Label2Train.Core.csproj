@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>Label2Train.Core</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" />
+    <PackageReference Include="NLog.Extensions.Logging" />
+    <PackageReference Include="FreeSql.Provider.Sqlite" />
+    <PackageReference Include="Sevencat.ImageFacade" />
+    <!-- ONNX 推理：纯托管实现，替代 Microsoft.ML.OnnxRuntime 原生栈 -->
+    <PackageReference Include="Sevencat.OnnxSharp" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 测试要构造 ClassCatalog 等内部类型 -->
+    <InternalsVisibleTo Include="Label2Train.Label.Tests" />
+  </ItemGroup>
+
+</Project>

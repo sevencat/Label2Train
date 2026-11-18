@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <RootNamespace>Label2Train.App</RootNamespace>
+    <AssemblyName>Label2Train.App</AssemblyName>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+    <ApplicationIcon>..\..\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="..\..\app.png" Link="Assets\app.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Label2Train.Core\Label2Train.Core.csproj" />
+    <ProjectReference Include="..\Label2Train.Label\Label2Train.Label.csproj" />
+    <ProjectReference Include="..\Label2Train.Train\Label2Train.Train.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" />
+    <PackageReference Include="Avalonia.Win32" />
+    <PackageReference Include="Oxyplot.Avalonia" />
+    <PackageReference Include="Sevencat.ImageFacade.SdcbSimdCodecs" />
+    <PackageReference Include="Sevencat.OnnxSharp" />
+    <PackageReference Include="SimdSkia.Avalonia" />
+    <!-- 窗口平台 + 渲染都用 SimdSkia（它自带 Avalonia.Win32/X11/Native 宿主，别再引 Avalonia.Desktop） -->
+    <PackageReference Include="Material.Avalonia" />
+    <PackageReference Include="Material.Icons.Avalonia" />
+    <PackageReference Include="CommunityToolkit.Mvvm" />
+    <PackageReference Include="Sevencat.ImageFacade" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <!-- 纯源生成器，不参与运行时：注册代码在编译期生成，别传给下游项目 -->
+    <PackageReference Include="Injectio" PrivateAssets="all" />
+  </ItemGroup>
+
+</Project>

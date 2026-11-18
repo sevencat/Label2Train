@@ -1,0 +1,65 @@
+using Microsoft.Extensions.DependencyInjection;
+using Label2Train.Core.Dataset;
+using Label2Train.Core.Dataset.TinyLabel;
+using Label2Train.Core.Storage;
+using Label2Train.Label;
+using Xunit;
+
+namespace Label2Train.Label.Tests;
+
+/// <summary>新建项目后必须能被探测到、并被浏览器打开（界面上「新建」的数据链路）。</summary>
+public class ProjectCreateTests
+{
+    [Fact]
+    public async Task NewProject_IsDetectedAndOpenableByBrowser()
+    {
+        using var workspace = new TestWorkspace();
+        using ServiceProvider provider = BuildProvider(workspace.OpenDatabase());
+
+        var projects = provider.GetRequiredService<TinyLabelProjectService>();
+
+        // 库启动时就建好 → 新建项目只插一条记录
+        long projectId = await projects.CreateAsync(StorageLocation.FromPath(workspace.Root), "新项目");
+
+        string databasePath = Path.Combine(workspace.Root, TinyLabelProjectCatalog.DefaultDatabaseFile);
+        Assert.True(File.Exists(databasePath), $"数据库文件不存在：{databasePath}");
+
+        // 库连接是容器里的常驻单例，读文件头要按共享读打开
+        using var stream = new FileStream(
+            databasePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+
+        byte[] header = new byte[16];
+        int read = stream.Read(header, 0, header.Length);
+        Assert.True(read >= 16, $"数据库文件只有 {read} 字节（SQLite 头缺失，探测会失败）");
+
+        var catalog = provider.GetRequiredService<TinyLabelProjectCatalog>();
+        TinyLabelProjectSummary summary =
+            Assert.Single(await catalog.ListAsync(StorageLocation.FromPath(workspace.Root)));
+        Assert.Equal(projectId, summary.Id);
+
+        var resolver = provider.GetRequiredService<DatasetStoreResolver>();
+        DatasetProbe probe = await resolver.DetectAsync(StorageLocation.FromPath(workspace.Root));
+        Assert.Equal(DatasetFormat.TinyLabelDb, probe.Format);
+
+        var browser = provider.GetRequiredService<LabelProjectBrowser>();
+        OpenedProject opened = await browser.OpenAsync(workspace.Root, projectId);
+
+        Assert.Equal(projectId, opened.ProjectId);
+        Assert.Equal("新项目", opened.ProjectName);
+        Assert.Empty(opened.Images);
+    }
+
+    private static ServiceProvider BuildProvider(TinyLabelDatabase database)
+    {
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(database);
+        services.AddSingleton(database.Orm);
+        services.AddLabel2TrainDatasets();
+        services.AddLabel2TrainLabel();
+        return services.BuildServiceProvider();
+    }
+}

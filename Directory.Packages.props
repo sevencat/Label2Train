@@ -1,0 +1,48 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+  <ItemGroup Label="UI">
+    <PackageVersion Include="Avalonia" Version="12.1.5" />
+    <!-- 渲染后端：纯托管 SimdSkia 取代 Skia 原生栈（替代 Avalonia.Desktop，版本须与 Avalonia 对齐） -->
+    <PackageVersion Include="Avalonia.Win32" Version="12.1.5" />
+    <PackageVersion Include="Oxyplot.Avalonia" Version="2.2.0" />
+    <PackageVersion Include="Sevencat.ImageFacade.SdcbSimdCodecs" Version="0.5.0" />
+    <PackageVersion Include="Sevencat.OnnxSharp" Version="0.5.0" />
+    <PackageVersion Include="SimdSkia.Avalonia" Version="0.1.6" />
+    <PackageVersion Include="Material.Avalonia" Version="3.21.0" />
+    <PackageVersion Include="Material.Icons.Avalonia" Version="3.0.2" />
+    <PackageVersion Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+  <ItemGroup Label="Imaging">
+    <PackageVersion Include="Sevencat.ImageFacade" Version="0.5.0" />
+  </ItemGroup>
+  <ItemGroup Label="Infrastructure">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <!-- 源生成器：用 [RegisterSingleton] 等特性生成 services 扩展方法，辅助 DI 注册 -->
+    <PackageVersion Include="Injectio" Version="6.3.0" />
+  </ItemGroup>
+  <ItemGroup Label="Logging">
+    <PackageVersion Include="NLog" Version="6.2.2" />
+    <PackageVersion Include="NLog.Extensions.Logging" Version="6.3.0" />
+  </ItemGroup>
+  <ItemGroup Label="Data">
+    <PackageVersion Include="FreeSql.Provider.Sqlite" Version="3.5.311" />
+  </ItemGroup>
+  <ItemGroup Label="AI">
+    <!-- 训练引擎：TorchSharp（LibTorch 绑定）+ 当前平台的原生包；CUDA 机器换 libtorch-cuda-12.8-win-x64 -->
+    <PackageVersion Include="TorchSharp" Version="0.107.0" />
+    <!-- 不用 libtorch-cpu 这个 meta 包：它会把 linux/osx 的原生产物一起拉下来 -->
+    <PackageVersion Include="libtorch-cpu-win-x64" Version="2.10.0" />
+    <PackageVersion Include="libtorch-cpu-linux-x64" Version="2.10.0" />
+    <PackageVersion Include="libtorch-cpu-osx-arm64" Version="2.10.0" />
+  </ItemGroup>
+  <ItemGroup Label="Test">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />
+  </ItemGroup>
+</Project>
