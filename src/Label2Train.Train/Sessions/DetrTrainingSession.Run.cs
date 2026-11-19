@@ -19,10 +19,12 @@ public sealed partial class DetrTrainingSession
         IProgress<TrainProgress>? progress,
         Action<string>? log)
     {
-        if (options.ImageSize < 64 || options.ImageSize % 224 != 0)
+        if (!TrainingPresets.IsValidDetrImageSize(options.ImageSize))
         {
             throw new ArgumentException(
-                $"RF-DETR 的 imgsz 必须是 224 的倍数（112 的倍数 ∪ 预处理要求的 32 的倍数），当前 {options.ImageSize}。",
+                $"RF-DETR 的 imgsz 必须是 {TrainingPresets.DetrImageSizeStride} 的倍数"
+                + "（DINOv2 的 patch 14 与检测头的下采样 16 都要整除），"
+                + $"当前 {options.ImageSize}；可用例如 224 / 336 / 448 / 560。",
                 nameof(options));
         }
 
@@ -37,13 +39,15 @@ public sealed partial class DetrTrainingSession
                 + DateTime.Now.ToString("yyyyMMdd-HHmmss", CultureInfo.InvariantCulture));
         Directory.CreateDirectory(output);
 
-        Module<Tensor, Tensor> model = BuildModel(options, classCount, device, log);
+        (Module<Tensor, Tensor> model, DetrArchitecture arch) = BuildModel(options, classCount, device, log);
         long parameters = model.parameters().Sum(parameter => parameter.numel());
 
         log?.Invoke($"data  : {options.Descriptor} · {trainSet.Samples.Count} 张 · {classCount} 类");
         log?.Invoke($"val   : {(validationSet is null ? "(无验证集)" : $"{validationSet.Samples.Count} 张")}");
+        // 结构可能被预训练权重改过（patch 16 / 4 层解码器），所以报实际值而不是 options
         log?.Invoke($"model : {(options.UseRfDetr ? "rfdetr" : "detr")}-detect-{classCount} "
-            + $"({parameters} params, Q={options.Queries})");
+            + $"({parameters} params, Q={arch.Queries}, enc={arch.EncoderLayers}, dec={arch.DecoderLayers}, "
+            + $"patch={arch.DinoPatch})");
         log?.Invoke($"device: {DeviceFactory.DescribeDetailed(options.Device)}");
         log?.Invoke($"output: {output}");
 
@@ -77,6 +81,10 @@ public sealed partial class DetrTrainingSession
         float bestMap50 = 0f;
         float lastMap95 = 0f;
 
+        // RF-DETR 从随机初始化开始，前几轮的 mAP 就是 0：只看 map50 > bestMap50 的话
+        // best.safetensors 永远不会写出来，用户一停训就「没有可导出的权重」
+        bool bestSaved = false;
+
         IReadOnlyList<EpochMetrics> history = trainer.Fit(
             _ => BuildEpochBatches(),
             schedule,
@@ -96,13 +104,16 @@ public sealed partial class DetrTrainingSession
 
                 progress?.Report(item);
 
-                if (map50 > bestMap50)
+                // 第一次评估一定落一份：哪怕 mAP 还是 0，也是「训过一轮」可信的权重，
+                // 后面只有真的更好才覆盖
+                if (!bestSaved || map50 > bestMap50)
                 {
+                    bestSaved = true;
                     bestMap50 = map50;
                     Checkpoint.Save(
                         Path.Combine(output, "best.safetensors"),
                         model,
-                        BuildMetadata(options, classCount, metrics));
+                        BuildMetadata(options, arch, classCount, metrics));
                 }
             },
             control);
@@ -110,7 +121,7 @@ public sealed partial class DetrTrainingSession
         Checkpoint.Save(
             Path.Combine(output, "detr.safetensors"),
             model,
-            BuildMetadata(options, classCount, history[^1]));
+            BuildMetadata(options, arch, classCount, history[^1]));
 
         WriteReport(output, options, classCount, parameters, reports, bestMap50, lastMap95);
         log?.Invoke($"checkpoint: {Path.Combine(output, "detr.safetensors")}");

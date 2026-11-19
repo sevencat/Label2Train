@@ -65,6 +65,15 @@ public sealed class YoloDatasetTrainingRunner(
             ? []
             : await store.OpenSplit(valSplit).LoadSamplesAsync(ct).ConfigureAwait(false);
 
+        // 没有 val split 就从训练集里留 20%：mAP 只能在验证集上算，不留的话曲线上的
+        // mAP50 / mAP50-95 永远是 0（库里的图片通常只有 train，split 为空）
+        bool autoValidation = validationSamples.Count == 0;
+
+        if (autoValidation)
+        {
+            (trainSamples, validationSamples) = ValidationHoldout.SplitInMemory(trainSamples);
+        }
+
         int totalBoxes = trainSamples.Sum(sample => sample.Boxes.Count)
                          + validationSamples.Sum(sample => sample.Boxes.Count);
 
@@ -86,7 +95,9 @@ public sealed class YoloDatasetTrainingRunner(
         model.Head.ApplyClassBiasPrior(options.ImageSize);
 
         Log(options, $"data  : {store.Id} · {trainSamples.Count} 张 · {classCount} 类 · {totalBoxes} 个框");
-        Log(options, $"val   : {(valSplit is null ? "(无验证集)" : $"{validationSamples.Count} 张")}");
+        Log(options, $"val   : {(validationSamples.Count == 0
+            ? "(无验证集，mAP 恒为 0)"
+            : $"{validationSamples.Count} 张{(autoValidation ? "（自动从训练集留出 20%）" : string.Empty)}")}");
         Log(options, $"model : {model.Architecture} ({YoloArchitectures.CountParameters(model)} params)");
         Log(options, $"device: {DeviceFactory.DescribeDetailed(computeDevice)}");
         Log(options, $"output: {output}");
@@ -102,9 +113,14 @@ public sealed class YoloDatasetTrainingRunner(
         var ema = new Ema(model, decay: EmaDecayFor(totalSteps));
         var schedule = new CosineSchedule(options.LearningRate, totalSteps, warmupSteps, options.LearningRate * 0.01f);
 
+        YoloPreprocessOptions augment = YoloPreprocessOptions.TrainDefault(options.ImageSize);
+
         Log(options,
             $"hyper : lr {options.LearningRate:G3} · steps {totalSteps} · warmup {warmupSteps} · "
-            + $"ema {ema.Decay:F4} · hflip 0.5 / hsv 0.015,0.7,0.4");
+            + $"ema {ema.Decay:F4} · hflip {augment.HorizontalFlipProbability:G2} · "
+            + $"mosaic {augment.MosaicProbability:G2} · scale ±{augment.ScaleGain:G2} · "
+            + $"translate ±{augment.TranslateGain:G2} · "
+            + $"hsv {augment.HueGain:G2},{augment.SaturationGain:G2},{augment.ValueGain:G2}");
 
         var trainer = new Trainer(
             model,
@@ -114,21 +130,9 @@ public sealed class YoloDatasetTrainingRunner(
             new Rng(1),
             ema);
 
-        using var trainLoader = new YoloSampleLoader(new YoloPreprocessOptions
-        {
-            Width = options.ImageSize,
-            Height = options.ImageSize,
-            HorizontalFlipProbability = 0.5f,
-            HueGain = 0.015f,
-            SaturationGain = 0.7f,
-            ValueGain = 0.4f,
-        });
-
-        using var validationLoader = new YoloSampleLoader(new YoloPreprocessOptions
-        {
-            Width = options.ImageSize,
-            Height = options.ImageSize,
-        });
+        using var trainLoader = new YoloSampleLoader(augment);
+        using var validationLoader = new YoloSampleLoader(
+            YoloPreprocessOptions.InferenceDefault(options.ImageSize));
 
         float bestMap50 = 0f;
         float lastMap50 = 0f;
@@ -241,7 +245,7 @@ public sealed class YoloDatasetTrainingRunner(
             trainSamples.Count + validationSamples.Count,
             totalBoxes,
             [.. store.Classes.Names],
-            valSplit is null ? [trainSplit] : [trainSplit, valSplit],
+            validationSamples.Count == 0 ? [trainSplit] : [trainSplit, "val"],
             options.Output,
             DryRun: false,
             [])
@@ -250,6 +254,31 @@ public sealed class YoloDatasetTrainingRunner(
             BestMap50_95 = lastMap95,
             Architecture = model.Architecture,
         };
+
+        YoloImageSample LoadOne(int sampleIndex, Rng rng)
+        {
+            DatasetSample sample = trainSamples[sampleIndex];
+            Stream stream;
+            lock (_storeGate)
+                stream = OpenImage(sample);
+
+            using (stream)
+            {
+                return trainLoader.Load(stream, sample.Image.RelativePath, ToLabels(sample), rng);
+            }
+        }
+
+        // 取打乱序列里相邻的 4 张拼贴：小数据集靠它补「多目标 + 不同尺度」的样本。
+        YoloImageSample LoadMosaic(int[] shuffleOrder, int position, Rng rng)
+        {
+            var parts = new YoloImageSample[4];
+            for (int index = 0; index < parts.Length; index++)
+            {
+                parts[index] = LoadOne(shuffleOrder[(position + index) % shuffleOrder.Length], rng);
+            }
+
+            return trainLoader.Mosaic(parts, rng);
+        }
 
         IEnumerable<Batch> BatchesForEpoch(int epoch)
         {
@@ -270,19 +299,13 @@ public sealed class YoloDatasetTrainingRunner(
                     // blob 存储的访问留在锁里（存储未必线程安全）。
                     Parallel.For(0, count, new ParallelOptions { MaxDegreeOfParallelism = Parallelism }, offset =>
                     {
-                        DatasetSample sample = trainSamples[order[start + offset]];
-                        Stream stream;
-                        lock (_storeGate)
-                            stream = OpenImage(sample);
+                        int position = start + offset;
+                        var rng = new Rng((ulong)((epoch * 7919L) + position));
 
-                        using (stream)
-                        {
-                            images[offset] = trainLoader.Load(
-                                stream,
-                                sample.Image.RelativePath,
-                                ToLabels(sample),
-                                new Rng((ulong)((epoch * 7919L) + start + offset)));
-                        }
+                        images[offset] = augment.MosaicProbability > 0f
+                            && rng.NextFloat() < augment.MosaicProbability
+                            ? LoadMosaic(order, position, rng)
+                            : LoadOne(order[position], rng);
                     });
 
                     YoloBatchResult packed = YoloBatchBuilder.Build(images);

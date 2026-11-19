@@ -15,14 +15,14 @@ namespace Label2Train.App.Tests;
 
 /// <summary>
 /// 训练产物导出：标注项目训练出来的模型要落进项目目录的 <c>models/</c>（跟着项目走），
-/// 外部目录数据集才退回输出目录的 <c>export/</c>；训练结束会自动导一次。
+/// 还没选项目时才退回输出目录的 <c>export/</c>；训练结束与用户停止都会自动导一次。
 /// </summary>
 public class TrainExportTests
 {
     private const string Architecture = "yolov8n-detect-2";
 
-    /// <summary>导出文件名前缀：按架构自动取，yolov8* → <c>yolov8</c>，不再叫 best。</summary>
-    private const string ExportPrefix = "yolov8";
+    /// <summary>导出文件名：按权重里的架构自动取，yolov8n → <c>yolov8_n</c>，不再叫 best。</summary>
+    private const string ExportPrefix = "yolov8_n";
 
     [AvaloniaFact]
     public async Task Export_Lands_In_Project_Models_Directory()
@@ -41,9 +41,8 @@ public class TrainExportTests
         Assert.True(File.Exists(Path.Combine(expected, ExportPrefix + ".json")));
         Assert.True(File.Exists(Path.Combine(expected, ExportPrefix + ".onnx")));
 
-        // 导出的 ONNX 立刻成为检测用的模型，检测单选也跟着切到对应家族
+        // 导出的 ONNX 立刻成为检测用的模型
         Assert.Equal(Path.Combine(expected, ExportPrefix + ".onnx"), train.LastOnnxPath);
-        Assert.Equal(ExportPrefix, train.SelectedDetectModel.FilePrefix);
     }
 
     [AvaloniaFact]
@@ -62,15 +61,16 @@ public class TrainExportTests
         Assert.Contains(TinyLabelWorkspace.ModelsFolderName, train.ExportDirectory, StringComparison.Ordinal);
     }
 
-    /// <summary>导出文件名按架构取，不再统一叫 best——三个模型要能同时在 models 目录里活着。</summary>
+    /// <summary>导出文件名按「架构 + 规模」取：yolov8_s / yolov11_m / rfdetr 各占一份，互不覆盖。</summary>
     [Theory]
-    [InlineData("yolov8n-detect-2", "yolov8")]
-    [InlineData("yolo11n-detect-2", "yolov11")]
+    [InlineData("yolov8n-detect-2", "yolov8_n")]
+    [InlineData("yolov8s-detect-2", "yolov8_s")]
+    [InlineData("yolo11m-detect-2", "yolov11_m")]
     [InlineData("rfdetr-detect-2", "rfdetr")]
     [InlineData("simple-detr-detect-2", "simple-detr")]
     public void Export_Prefix_Follows_Architecture(string architecture, string expected)
     {
-        Assert.Equal(expected, TrainingExportService.PrefixFor(architecture));
+        Assert.Equal(expected, TrainingExportService.DefaultPrefixFor(architecture));
     }
 
     /// <summary>没选项目或没选输出路径时「开始训练」必须是灰的。</summary>
@@ -137,52 +137,47 @@ public class TrainExportTests
     }
 
     /// <summary>
-    /// 检测单选必须严格对应前缀：选 YOLOv8 只认 <c>yolov8.onnx</c>，没有就返回空——
-    /// 拿 yolov11 / rfdetr 的权重顶上，框会整体错，DETR 还会直接崩在输出名上。
+    /// 训练入口按界面 imgsz 走：合法值原样传递（以前 runner 硬编码 224，界面填 560 也不生效），
+    /// 非法值就近纠正。
+    /// </summary>
+    [Theory]
+    [InlineData(224, 224)]
+    [InlineData(560, 560)]
+    [InlineData(672, 672)]
+    [InlineData(640, 672)]
+    public void Resolve_Detr_ImageSize_Honours_Valid_Values(int input, int expected)
+    {
+        Assert.Equal(expected, TrainingPresets.ResolveDetrImageSize(input));
+    }
+
+    /// <summary>
+    /// 输出目录 = <c>projects/{id}/models/{模型名}_{规模}</c>：切规模、切家族都跟着换，
+    /// 新权重不能写进旧模型目录，否则导出会把两份产物混在一起。
     /// </summary>
     [AvaloniaFact]
-    public async Task Detect_Model_Path_Follows_Selection_Strictly()
+    public async Task Output_Directory_Follows_Project_Model_And_Scale()
     {
         await using AppTestHost host = AppTestHost.Create();
-        (TrainViewModel train, _) = await OpenSyntheticProjectAsync(host);
+        (TrainViewModel train, long projectId) = await OpenSyntheticProjectAsync(host);
 
-        string directory = train.ExportDirectory;
-        Directory.CreateDirectory(directory);
+        string models = TinyLabelWorkspace.ModelDirectory(StorageLocation.FromPath(host.Root), projectId);
 
-        // 只导出了 v11
-        File.WriteAllBytes(Path.Combine(directory, "yolov11.onnx"), [0]);
+        Assert.Equal(Path.Combine(models, "yolov8_n"), train.OutputDirectory);
+        Assert.Equal("yolov8_n", train.ModelKey);
 
-        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "yolov11");
-        Assert.Equal(Path.Combine(directory, "yolov11.onnx"), train.ResolveDetectModelPath());
+        train.SelectedScale = train.ModelScales.Single(scale => scale.Id == "s");
+        Assert.Equal(Path.Combine(models, "yolov8_s"), train.OutputDirectory);
 
-        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "yolov8");
-        Assert.Equal(string.Empty, train.ResolveDetectModelPath());
+        // RF-DETR 的体量由 queries / 层数决定，没有规模字母
+        train.SelectedModel = train.ModelFamilies.Single(model => model.Id == "rfdetr");
+        Assert.Equal(Path.Combine(models, "rfdetr"), train.OutputDirectory);
 
-        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "rfdetr");
-        Assert.Equal(string.Empty, train.ResolveDetectModelPath());
-
-        // rfdetr 导出后，选 RF-DETR 才拿到它；选 YOLO 依然是空
-        File.WriteAllBytes(Path.Combine(directory, "rfdetr.onnx"), [0]);
-        Assert.Equal(Path.Combine(directory, "rfdetr.onnx"), train.ResolveDetectModelPath());
-
-        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "yolov8");
-        Assert.Equal(string.Empty, train.ResolveDetectModelPath());
-
-        // 旧版 best.onnx 只给 YOLOv8 兼容，v11 不猜
-        File.Delete(Path.Combine(directory, "yolov11.onnx"));
-        File.WriteAllBytes(Path.Combine(directory, TrainingExportService.OnnxFileName), [0]);
-
-        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "yolov11");
-        Assert.Equal(string.Empty, train.ResolveDetectModelPath());
-
-        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "yolov8");
-        Assert.Equal(
-            Path.Combine(directory, TrainingExportService.OnnxFileName),
-            train.ResolveDetectModelPath());
+        train.SelectedModel = train.ModelFamilies.Single(model => model.Id == "v11");
+        Assert.Equal(Path.Combine(models, "yolov11_s"), train.OutputDirectory);
     }
 
     [AvaloniaFact]
-    public async Task External_Dataset_Falls_Back_To_Output_Export()
+    public async Task No_Project_Falls_Back_To_Output_Export()
     {
         await using AppTestHost host = AppTestHost.Create();
         TrainViewModel train = host.ViewModel.Train;

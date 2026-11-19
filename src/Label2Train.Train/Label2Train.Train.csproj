@@ -11,6 +11,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- 测试要直接验证「没有 val split 时自动留出验证集」的文件搬运与 data.yaml 补写 -->
+    <InternalsVisibleTo Include="Label2Train.App.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="TorchSharp" />
     <!-- 按构建平台只引一份原生产物，避免 libtorch-cpu 把 linux-x64 / osx-arm64 的几 G 一起还原 -->
     <PackageReference Include="libtorch-cpu-linux-x64" Condition="$([MSBuild]::IsOSPlatform('Linux'))" />

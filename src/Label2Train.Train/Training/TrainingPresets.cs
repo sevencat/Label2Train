@@ -16,12 +16,20 @@ public static class TrainingPresets
     /// </summary>
     public static readonly (int Epochs, int BatchSize, int ImageSize) RfDetr = (100, 4, 560);
 
-    /// <summary>DETR 系输入边长的步长：patch 14 与下采样 16 的公倍数。</summary>
+    /// <summary>
+    /// DETR 系输入边长的步长：DINOv2 的 patch 14 与检测头下采样 16 的公倍数。
+    /// 界面校验、训练、ONNX 导出全都用它，免得三处各写一个数（训练侧曾单独要求 224，
+    /// 界面上填的 560 根本到不了训练，日志里永远是 224）。
+    /// </summary>
     public const int DetrImageSizeStride = 112;
 
     /// <summary>一张 ONNX 图能不能建出来，就看边长是不是 112 的倍数。</summary>
     public static bool IsValidDetrImageSize(int imageSize) =>
         imageSize >= DetrImageSizeStride && imageSize % DetrImageSizeStride == 0;
+
+    /// <summary>合法值原样返回，非法时就近纠正（训练入口兜底用，界面已经纠正过一次）。</summary>
+    public static int ResolveDetrImageSize(int imageSize) =>
+        IsValidDetrImageSize(imageSize) ? imageSize : NearestValidDetrImageSize(imageSize);
 
     /// <summary>就近换成合法边长；低于一档时给最小的一档（112）。</summary>
     public static int NearestValidDetrImageSize(int imageSize)

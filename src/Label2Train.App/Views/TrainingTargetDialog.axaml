@@ -1,15 +1,54 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:l="using:Label2Train.App.Localization"
-        x:Class="Label2Train.App.Views.TrainingParamsDialog"
-        Title="{l:Loc Train.ParamsTitle}"
-        Width="500" SizeToContent="Height"
+        xmlns:vm="using:Label2Train.App.ViewModels"
+        xmlns:local="using:Label2Train.App.Views"
+        x:Class="Label2Train.App.Views.TrainingTargetDialog"
+        Title="{l:Loc Train.TargetTitle}"
+        Width="560" SizeToContent="Height"
         CanResize="False"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner">
 
   <StackPanel Margin="20" Spacing="14">
-    <TextBlock Text="{l:Loc Train.ParamsTitle}" FontSize="16" FontWeight="SemiBold" />
+    <TextBlock Text="{l:Loc Train.TargetTitle}" FontSize="16" FontWeight="SemiBold" />
+    <TextBlock Text="{l:Loc Train.TargetDialogHint}" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+
+    <!-- 训练用哪个项目：库固定是标注端当前那个，只能选项目 -->
+    <StackPanel Spacing="4">
+      <TextBlock Text="{l:Loc Train.Project}" FontSize="13" Opacity="0.8" />
+      <ComboBox x:Name="ProjectBox" HorizontalAlignment="Stretch" Height="30">
+        <ComboBox.ItemTemplate>
+          <DataTemplate x:DataType="local:ProjectChoice">
+            <TextBlock Text="{Binding Display}" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+    </StackPanel>
+
+    <!-- 训练成什么模型：家族决定网络，规模决定体量（DETR 不看规模） -->
+    <Grid ColumnDefinitions="Auto,*,Auto,*" ColumnSpacing="8">
+      <TextBlock Grid.Column="0" Text="{l:Loc Train.Model}" FontSize="13" Opacity="0.8"
+                 VerticalAlignment="Center" />
+      <ComboBox Grid.Column="1" x:Name="ModelBox" Height="30" HorizontalAlignment="Stretch">
+        <ComboBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:ModelOption">
+            <TextBlock Text="{Binding Name}" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+
+      <TextBlock Grid.Column="2" Text="{l:Loc Train.Scale}" FontSize="13" Opacity="0.8"
+                 VerticalAlignment="Center" Margin="8,0,0,0" />
+      <ComboBox Grid.Column="3" x:Name="ScaleBox" Height="30" HorizontalAlignment="Stretch"
+                ToolTip.Tip="{l:Loc Train.ScaleTip}">
+        <ComboBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:ScaleOption">
+            <TextBlock Text="{Binding Name}" />
+          </DataTemplate>
+        </ComboBox.ItemTemplate>
+      </ComboBox>
+    </Grid>
 
     <!-- 一键回到推荐值：YOLO 与 RF-DETR 对 imgsz 的要求完全不同，手填容易踩坑 -->
     <StackPanel Orientation="Horizontal" Spacing="8">

@@ -52,12 +52,6 @@ public static class RfDetrOnnxExporter
                 "窗口注意力主干（WindowSize > 0）暂不支持 ONNX 导出：窗口划分与移位需要额外算子，见 plan.md P2-3-4。");
         }
 
-        if (detector.UsesRefPointHead)
-        {
-            throw new NotSupportedException(
-                "ref_point_head（4 维 cxcywh 参考点 + sin/cos 编码）暂不支持 ONNX 导出，见 plan.md P2-3-5。");
-        }
-
         if (detector.UsesTwoStage)
         {
             throw new NotSupportedException(
@@ -70,58 +64,78 @@ public static class RfDetrOnnxExporter
                 "Group-DETR（groupDetr > 1）暂不支持 ONNX 导出：导出器目前只处理单组 query，见 plan.md P2-3-5。");
         }
 
-        if (detector.UsesC2fProjector)
-        {
-            throw new NotSupportedException(
-                "C2f 融合投影器（官方结构）暂不支持 ONNX 导出，见 plan.md P2-3-5。");
-        }
-
         IReadOnlyDictionary<string, Tensor> state = detector.state_dict();
         var builder = new OnnxGraphBuilder($"rfdetr-{detector.ClassCount}");
         builder.Input(InputName, OnnxDataType.Float, 1L, 3L, imageHeight, imageWidth);
 
         var context = new Context(builder, state);
 
-        // 1) DINOv2 → tokens [1, 1+N, D]
-        int tokens = DinoV2OnnxExporter.AppendCore(
-            builder, config, Scoped(state, "backbone."), InputName, imageHeight, imageWidth, "rf.tokens");
-
-        int side = imageHeight / config.PatchSize;
-
-        // 2) 去掉 cls → [1,D,hp,wp]，再 1×1 投影到 256
-        string patchTokens = context.AppendSlice("rf.tokens", "rf.patches", axis: 1, start: 1, end: tokens);
-        string channelsFirst = context.AppendTranspose(patchTokens, "rf.patches.transposed", 0, 2, 1);
-        string map = context.AppendReshape(
-            channelsFirst, "rf.map", new long[] { 1, config.EmbeddingSize, side, side });
-
-        string projected = context.AppendConv("input_proj", map, pads: 0, stride: 1);
-
-        // 3) 4 档投影：Conv1×1 + GroupNorm(32)，最细一档再接 Conv3×3(stride 2)
         int levels = detector.LevelCount;
         var levelNames = new string[levels];
         var levelShapes = new (int Height, int Width)[levels];
 
-        for (int level = 0; level < levels; level++)
+        if (detector.UsesC2fProjector)
         {
-            int stride = level == 0 ? Strides[level] / 2 : Strides[level];
-            int height = Math.Max(1, imageHeight / stride);
-            int width = Math.Max(1, imageWidth / stride);
+            // 官方路径：主干 4 个深度层的中间输出 → 沿通道拼接 → C2f 融合 → 单档 256 维特征图
+            int side = imageHeight / config.PatchSize;
 
-            string resized = context.AppendResize(projected, $"rf.level{level}.resized", 256, height, width);
-            string conv = context.AppendConv($"projector.{level}.conv", resized, pads: 0, stride: 1);
-            string norm = context.AppendGroupNorm(
-                $"projector.{level}.norm", conv, RfDetrProjectionLevel.Groups, 256, height, width,
-                $"rf.level{level}.norm");
+            DinoV2OnnxExporter.AppendCoreTapped(
+                builder,
+                config,
+                Scoped(state, "backbone."),
+                InputName,
+                imageHeight,
+                imageWidth,
+                detector.C2fTaps,
+                out IReadOnlyList<string> tapMaps);
 
-            if (level == 0)
+            string fused = tapMaps.Count == 1
+                ? tapMaps[0]
+                : context.AppendConcat(tapMaps, axis: 1, "rf.c2f.taps");
+
+            levelNames[0] = context.AppendC2fProjector(
+                "projector.stages.0", fused, config.EmbeddingSize * tapMaps.Count, side, side, "rf.c2f");
+            levelShapes[0] = (side, side);
+        }
+        else
+        {
+            // 1) DINOv2 → tokens [1, 1+N, D]
+            int tokens = DinoV2OnnxExporter.AppendCore(
+                builder, config, Scoped(state, "backbone."), InputName, imageHeight, imageWidth, "rf.tokens");
+
+            int side = imageHeight / config.PatchSize;
+
+            // 2) 去掉 cls → [1,D,hp,wp]，再 1×1 投影到 256
+            string patchTokens = context.AppendSlice("rf.tokens", "rf.patches", axis: 1, start: 1, end: tokens);
+            string channelsFirst = context.AppendTranspose(patchTokens, "rf.patches.transposed", 0, 2, 1);
+            string map = context.AppendReshape(
+                channelsFirst, "rf.map", new long[] { 1, config.EmbeddingSize, side, side });
+
+            string projected = context.AppendConv("input_proj", map, pads: 0, stride: 1);
+
+            // 3) 多档投影：Conv1×1 + GroupNorm(32)，最细一档再接 Conv3×3(stride 2)
+            for (int level = 0; level < levels; level++)
             {
-                norm = context.AppendConv("projector.0.down", norm, pads: 1, stride: 2);
-                height = Math.Max(1, imageHeight / Strides[level]);
-                width = Math.Max(1, imageWidth / Strides[level]);
-            }
+                int stride = level == 0 ? Strides[level] / 2 : Strides[level];
+                int height = Math.Max(1, imageHeight / stride);
+                int width = Math.Max(1, imageWidth / stride);
 
-            levelNames[level] = norm;
-            levelShapes[level] = (height, width);
+                string resized = context.AppendResize(projected, $"rf.level{level}.resized", 256, height, width);
+                string conv = context.AppendConv($"projector.{level}.conv", resized, pads: 0, stride: 1);
+                string norm = context.AppendGroupNorm(
+                    $"projector.{level}.norm", conv, RfDetrProjectionLevel.Groups, 256, height, width,
+                    $"rf.level{level}.norm");
+
+                if (level == 0)
+                {
+                    norm = context.AppendConv("projector.0.down", norm, pads: 1, stride: 2);
+                    height = Math.Max(1, imageHeight / Strides[level]);
+                    width = Math.Max(1, imageWidth / Strides[level]);
+                }
+
+                levelNames[level] = norm;
+                levelShapes[level] = (height, width);
+            }
         }
 
         int count = levelShapes[0].Height * levelShapes[0].Width;
@@ -135,7 +149,9 @@ public static class RfDetrOnnxExporter
             ReferenceGrid(levelShapes[0].Height, levelShapes[0].Width, levels));
 
         // 4) 编码器：每层「自注意力 → 可变形注意力 → FFN」，三处都有残差并把 norm 放在前面
-        int heads = Heads(state, "encoder_layers.0.deform_attn.", levels);
+        int heads = detector.EncoderLayerCount > 0
+            ? Heads(state, "encoder_layers.0.deform_attn.", levels, detector.DeformPoints)
+            : detector.DecoderHeads;
 
         for (int index = 0; index < detector.EncoderLayerCount; index++)
         {
@@ -158,7 +174,7 @@ public static class RfDetrOnnxExporter
                 levelNames,
                 count,
                 heads,
-                4,
+                detector.DeformPoints,
                 levelShapes,
                 RfDetrDetector.EmbeddingSize,
                 $"rf.enc{index}.deform",
@@ -176,7 +192,9 @@ public static class RfDetrOnnxExporter
             memory = context.AppendAdd(memory, ffn, $"rf.enc{index}.sum3");
         }
 
-        memory = context.AppendLayerNorm("encoder_norm", memory, "rf.enc.out");
+        // 官方权重没有编码器层（encoderLayers = 0），这时也没有 encoder_norm
+        if (detector.EncoderLayerCount > 0)
+            memory = context.AppendLayerNorm("encoder_norm", memory, "rf.enc.out");
 
         // 5) 解码器：可学习 query + 逐层参考点细化（每层用输出预测参考点增量）
         string queries = context.ConstantFloat(
@@ -184,16 +202,47 @@ public static class RfDetrOnnxExporter
             new long[] { 1, detector.Queries, RfDetrDetector.EmbeddingSize },
             TorchInterop.ToArray(context.State("query_embed")));
 
-        string centers = context.ConstantFloat(
-            "rf.centers",
-            new long[] { 1, detector.Queries, 2 },
-            TorchInterop.ToArray(context.State("refpoint_embed")));
+        // 官方参考点是 4 维 cxcywh（后两维是归一化宽高），2 维 xy 是早期的简化版
+        int referenceDims = detector.UsesRefPointHead ? 4 : 2;
+        float[] referenceValues = TorchInterop.ToArray(context.State("refpoint_embed"));
+        var centerValues = new float[detector.Queries * 2];
 
-        int decoderHeads = Heads(state, "decoder_layers.0.deform_attn.", levels);
+        for (int query = 0; query < detector.Queries; query++)
+        {
+            centerValues[query * 2] = referenceValues[query * referenceDims];
+            centerValues[query * 2 + 1] = referenceValues[query * referenceDims + 1];
+        }
+
+        string centers = context.ConstantFloat(
+            "rf.centers", new long[] { 1, detector.Queries, 2 }, centerValues);
+
+        // 4 维时每层都要先用 ref_point_head 把完整参考点编码回 query 空间
+        string? references = referenceDims == 4
+            ? context.ConstantFloat("rf.references", new long[] { 1, detector.Queries, 4 }, referenceValues)
+            : null;
+
+        int decoderHeads = Heads(state, "decoder_layers.0.deform_attn.", levels, detector.DeformPoints);
 
         for (int index = 0; index < detector.DecoderLayerCount; index++)
         {
             string prefix = $"decoder_layers.{index}.";
+
+            string layerInput = queries;
+
+            if (references is not null)
+            {
+                string encoded = context.AppendSineEmbed(
+                    references,
+                    referenceDims,
+                    RfDetrDetector.EmbeddingSize,
+                    detector.Queries,
+                    $"rf.dec{index}.refpoint");
+
+                layerInput = context.AppendAdd(
+                    queries,
+                    context.AppendMlp("ref_point_head.layers", encoded, $"rf.dec{index}.refpoint.mlp", layerCount: 2),
+                    $"rf.dec{index}.refpoint.sum");
+            }
 
             string points = context.AppendExpand(
                 context.AppendUnsqueeze(centers, $"rf.dec{index}.unsqueeze", axis: 2),
@@ -202,7 +251,7 @@ public static class RfDetrOnnxExporter
 
             string self = context.AppendSelfAttention(
                 $"{prefix}self_attn",
-                context.AppendLayerNorm($"{prefix}norm1", queries, $"rf.dec{index}.norm1"),
+                context.AppendLayerNorm($"{prefix}norm1", layerInput, $"rf.dec{index}.norm1"),
                 detector.Queries,
                 decoderHeads,
                 $"rf.dec{index}.self");
@@ -217,7 +266,7 @@ public static class RfDetrOnnxExporter
                 levelNames,
                 detector.Queries,
                 decoderHeads,
-                4,
+                detector.DeformPoints,
                 levelShapes,
                 RfDetrDetector.EmbeddingSize,
                 $"rf.dec{index}.deform",
@@ -240,6 +289,19 @@ public static class RfDetrOnnxExporter
             centers = context.AppendSigmoid(
                 context.AppendAdd(centers, delta, $"rf.dec{index}.center.sum"),
                 $"rf.dec{index}.center");
+
+            // 4 维参考点的后两维（宽高）不细化，沿用常量，只把中心替换成刚算出来的
+            if (references is not null)
+            {
+                references = context.AppendConcat(
+                    new[]
+                    {
+                        centers,
+                        context.AppendSlice(references, $"rf.dec{index}.size", axis: 2, start: 2, end: 4),
+                    },
+                    axis: 2,
+                    $"rf.dec{index}.references");
+            }
         }
 
         queries = context.AppendLayerNorm("decoder_norm", queries, "rf.dec.out");
@@ -285,11 +347,11 @@ public static class RfDetrOnnxExporter
         return scoped;
     }
 
-    /// <summary>从 <c>attention_weights.weight</c> 的行数反推头数（points 固定为 4）。</summary>
-    private static int Heads(IReadOnlyDictionary<string, Tensor> state, string prefix, int levels)
+    /// <summary>从 <c>attention_weights.weight</c> 的行数（头数 × 档数 × 采样点）反推头数。</summary>
+    private static int Heads(IReadOnlyDictionary<string, Tensor> state, string prefix, int levels, int points)
     {
         long rows = state[prefix + "attention_weights.weight"].shape[0];
-        return (int)(rows / (levels * 4));
+        return (int)(rows / (levels * points));
     }
 
     /// <summary>归一化参考点网格（与 <c>RfDetrDetector.ReferenceGrid</c> 完全一致）。</summary>
@@ -629,6 +691,181 @@ public static class RfDetrOnnxExporter
                 scaled,
                 AppendTensorReshaped(prefix + ".bias", new long[] { channels, 1, 1 }),
                 hint + ".shifted");
+        }
+
+        /// <summary>无偏置 Conv（<c>RfDetrConvBn</c> 里的 conv 是 <c>bias:false</c>）。</summary>
+        private string AppendConvNoBias(string prefix, string input, int pads, int stride)
+        {
+            string output = Next("rf.conv." + prefix);
+            Builder.Node(
+                "Conv",
+                new[] { input, AppendTensor(prefix + ".weight") },
+                new[] { output },
+                OnnxAttribute.Ints("pads", pads, pads, pads, pads),
+                OnnxAttribute.Ints("strides", stride, stride),
+                OnnxAttribute.Ints("dilations", 1, 1),
+                OnnxAttribute.Int("group", 1));
+
+            return output;
+        }
+
+        /// <summary>
+        /// 用**批统计量**的 BatchNorm（<c>track_running_stats=false</c>，checkpoint 里也没有
+        /// <c>running_mean/var</c>）。ONNX 的 BatchNormalization 只认 running stats，所以按定义
+        /// 展开：固定 batch=1 时就是在 H·W 上求均值/方差。
+        /// </summary>
+        private string AppendBatchNorm(string prefix, string input, int channels, int height, int width, string hint)
+        {
+            long spatial = (long)height * width;
+
+            string flat = AppendReshape(input, hint + ".flat", new long[] { channels, spatial });
+            string mean = AppendReduceMean(flat, hint + ".mean", axis: 1);
+            string centered = AppendSub(flat, mean, hint + ".centered");
+            string squared = AppendMul(centered, centered, hint + ".squared");
+            string variance = AppendReduceMean(squared, hint + ".variance", axis: 1);
+            string eps = ConstantFloat(hint + ".eps", new long[] { 1 }, new[] { 1e-5f });
+            string standard = AppendSqrt(AppendAdd(variance, eps, hint + ".variance.eps"), hint + ".std");
+            string normalised = AppendDiv(centered, standard, hint + ".normalised");
+            string restored = AppendReshape(
+                normalised, hint + ".restored", new long[] { 1, channels, height, width });
+
+            string scaled = AppendMul(
+                restored,
+                AppendTensorReshaped(prefix + ".weight", new long[] { channels, 1, 1 }),
+                hint + ".scaled");
+
+            return AppendAdd(
+                scaled,
+                AppendTensorReshaped(prefix + ".bias", new long[] { channels, 1, 1 }),
+                hint + ".shifted");
+        }
+
+        /// <summary>Conv+BN（<c>RfDetrConvBn</c>）：1×1/3×3 卷积后接批统计量 BN。</summary>
+        private string AppendConvBn(
+            string prefix, string input, int inChannels, int outChannels, int pads, int height, int width, string hint)
+        {
+            _ = inChannels;
+            string conv = AppendConvNoBias(prefix + ".conv", input, pads, stride: 1);
+
+            return AppendBatchNorm(prefix + ".bn", conv, outChannels, height, width, hint + ".bn");
+        }
+
+        /// <summary>通道 LayerNorm（<c>RfDetrChannelNorm</c>）：NCHW → NHWC → LayerNorm(axis=-1) → NCHW。</summary>
+        private string AppendChannelNorm(string prefix, string input, int channels, string hint)
+        {
+            string channelsLast = AppendTranspose(input, hint + ".channels.last", 0, 2, 3, 1);
+
+            string normalised = Next(hint + ".norm");
+            Builder.Node(
+                "LayerNormalization",
+                new[]
+                {
+                    channelsLast,
+                    AppendTensorReshaped(prefix + ".weight", new long[] { channels }),
+                    AppendTensor(prefix + ".bias"),
+                },
+                new[] { normalised },
+                OnnxAttribute.Int("axis", -1),
+                OnnxAttribute.Float("epsilon", 1e-6f));
+
+            return AppendTranspose(normalised, hint, 0, 3, 1, 2);
+        }
+
+        /// <summary>
+        /// C2f 投影器（官方 <c>backbone.0.projector</c>）：主干多层特征图拼成 <c>[1,4D,h,w]</c> 后
+        /// <c>cv1 → 对半切 → 若干 Bottleneck → 拼接 → cv2</c>，最后一次通道 LayerNorm。
+        /// </summary>
+        public string AppendC2fProjector(
+            string prefix, string input, int inChannels, int height, int width, string hint)
+        {
+            string block = prefix + ".0";
+            int outChannels = (int)State(block + ".cv1.conv.weight").shape[0];
+            int hidden = outChannels / 2;
+
+            string cv1 = AppendConvBn(
+                block + ".cv1", input, inChannels, outChannels, pads: 0, height, width, hint + ".cv1");
+
+            var parts = new List<string>
+            {
+                AppendSlice(cv1, hint + ".split0", axis: 1, start: 0, end: hidden),
+            };
+
+            string current = AppendSlice(cv1, hint + ".split1", axis: 1, start: hidden, end: outChannels);
+            parts.Add(current);
+
+            int bottlenecks = 0;
+
+            while (_state.ContainsKey($"{block}.m.{bottlenecks}.cv1.conv.weight"))
+                bottlenecks++;
+
+            for (int index = 0; index < bottlenecks; index++)
+            {
+                string bottleneck = $"{block}.m.{index}";
+
+                string middle = AppendConvBn(
+                    bottleneck + ".cv1", current, hidden, hidden, pads: 1, height, width, hint + $".m{index}.cv1");
+
+                string output = AppendConvBn(
+                    bottleneck + ".cv2", middle, hidden, hidden, pads: 1, height, width, hint + $".m{index}.cv2");
+
+                current = AppendAdd(current, output, hint + $".m{index}.residual");
+                parts.Add(current);
+            }
+
+            string merged = AppendConcat(parts, axis: 1, hint + ".concat");
+
+            string cv2 = AppendConvBn(
+                block + ".cv2",
+                merged,
+                outChannels + hidden * bottlenecks,
+                outChannels,
+                pads: 0,
+                height,
+                width,
+                hint + ".cv2");
+
+            return AppendChannelNorm(prefix + ".1", cv2, outChannels, hint + ".norm");
+        }
+
+        public string AppendConcat(IReadOnlyList<string> inputs, int axis, string hint)
+        {
+            string output = Next(hint);
+            Builder.Node("Concat", inputs.ToArray(), new[] { output }, OnnxAttribute.Int("axis", axis));
+            return output;
+        }
+
+        /// <summary>
+        /// 参考点的正弦编码：<c>[1,Q,n]</c> → <c>[1,Q,2·n·feats]</c>，逐维
+        /// <c>sin/cos(x·2π / 10000^(i/feats))</c>，<c>feats = D/n</c>
+        /// （与 <c>RfDetrDetector.SineEmbed</c> 完全一致）。
+        /// </summary>
+        public string AppendSineEmbed(string input, int dimensions, int embedding, int queries, string hint)
+        {
+            int feats = embedding / dimensions;
+            var scales = new float[feats];
+
+            for (int index = 0; index < feats; index++)
+                scales[index] = MathF.Pow(10000f, (float)index / feats);
+
+            string expanded = AppendUnsqueeze(input, hint + ".unsqueeze", axis: 3);
+            string doubled = AppendMul(
+                expanded,
+                ConstantFloat(hint + ".two.pi", new long[] { 1 }, new[] { (float)(2.0 * Math.PI) }),
+                hint + ".doubled");
+
+            string angles = AppendDiv(
+                doubled, ConstantFloat(hint + ".scales", new long[] { 1, 1, 1, feats }, scales), hint + ".angles");
+
+            string sine = Next(hint + ".sin");
+            Builder.Node("Sin", new[] { angles }, new[] { sine });
+
+            string cosine = Next(hint + ".cos");
+            Builder.Node("Cos", new[] { angles }, new[] { cosine });
+
+            string concatenated = AppendConcat(new[] { sine, cosine }, axis: 3, hint + ".encoded");
+
+            return AppendReshape(
+                concatenated, hint, new long[] { 1, queries, dimensions * 2 * feats });
         }
 
         /// <summary>把 <c>[1,L,D]</c> 拆成每个头 <c>[1,heads,L,hd]</c>。</summary>

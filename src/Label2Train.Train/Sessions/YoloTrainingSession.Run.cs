@@ -65,21 +65,10 @@ public sealed partial class YoloTrainingSession
             new Rng(1),
             ema);
 
-        using var trainLoader = new YoloSampleLoader(new YoloPreprocessOptions
-        {
-            Width = options.ImageSize,
-            Height = options.ImageSize,
-            // 与 YoloDatasetTrainingRunner 的训练增强保持一致（小数据集靠它补多样性）。
-            HorizontalFlipProbability = 0.5f,
-            HueGain = 0.015f,
-            SaturationGain = 0.7f,
-            ValueGain = 0.4f,
-        });
-        using var validationLoader = new YoloSampleLoader(new YoloPreprocessOptions
-        {
-            Width = options.ImageSize,
-            Height = options.ImageSize,
-        });
+        // 与 YoloDatasetTrainingRunner 共用同一套增强定义（小数据集靠它补多样性）。
+        using var trainLoader = new YoloSampleLoader(YoloPreprocessOptions.TrainDefault(options.ImageSize));
+        using var validationLoader = new YoloSampleLoader(
+            YoloPreprocessOptions.InferenceDefault(options.ImageSize));
 
         var reports = new List<TrainProgress>(options.Epochs);
         float bestMap50 = 0f;

@@ -42,13 +42,12 @@
         <!-- 第一行：打开数据集 + 训练控制 + 参数 -->
         <Grid Grid.Row="0" ColumnDefinitions="Auto,*" ColumnSpacing="8">
           <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="{l:Loc Train.Dataset}" Classes="caption" VerticalAlignment="Center" />
-            <Button Content="YOLO" Padding="10,2" FontSize="13" Click="OnOpenYolo"
-                    ToolTip.Tip="{l:Loc Train.OpenYoloTip}" />
-            <Button Content="RF-DETR" Padding="10,2" FontSize="13" Click="OnOpenRfDetr"
-                    ToolTip.Tip="{l:Loc Train.OpenRfDetrTip}" />
-            <Button Content="{l:Loc Train.SelectProject}" Padding="10,2" FontSize="13"
-                    Click="OnOpenTinyLabel" ToolTip.Tip="{l:Loc Train.SelectProjectTip}" />
+            <TextBlock Text="{l:Loc Train.Target}" Classes="caption" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding TargetSummary}" Classes="value" Opacity="0.85" MaxWidth="300"
+                       TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding TargetSummary}" />
+            <Button Content="{l:Loc Train.TargetSetup}" Padding="10,2" FontSize="13"
+                    Click="OnSetupTarget" ToolTip.Tip="{l:Loc Train.TargetSetupTip}"
+                    IsEnabled="{Binding !IsTraining}" />
 
             <Border Width="1" Height="20" Background="{DynamicResource PanelBorderBrush}" Margin="2,0" />
 
@@ -76,8 +75,6 @@
             <TextBlock Text="{Binding BatchSizeText}" Classes="value" MinWidth="20" />
             <TextBlock Text="imgsz" Classes="caption" Margin="10,0,0,0" />
             <TextBlock Text="{Binding ImageSizeText}" Classes="value" MinWidth="30" />
-            <Button Content="{l:Loc Train.Params}" Padding="10,2" FontSize="13" Margin="4,0,0,0"
-                    Click="OnEditParams" ToolTip.Tip="{l:Loc Train.ParamsTip}" />
           </StackPanel>
         </Grid>
 
@@ -88,8 +85,6 @@
                        ToolTip.Tip="{l:Loc Train.OutputDirTip}" />
             <TextBlock Text="{Binding OutputDirectory}" Classes="value" Opacity="0.8" MaxWidth="230"
                        TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding OutputDirectory}" />
-            <Button Content="{l:Loc Train.Set}" Padding="10,2" FontSize="13" Margin="2,0,0,0"
-                    Click="OnPickOutput" ToolTip.Tip="{l:Loc Train.OutputDirTip}" />
             <Button Content="{l:Loc Train.Open}" Padding="10,2" FontSize="13" Margin="2,0,0,0"
                     Click="OnOpenOutput" ToolTip.Tip="{l:Loc Train.OpenOutputTip}" />
             <TextBlock Text="{l:Loc Train.Product}" Classes="caption" Margin="10,0,0,0"
@@ -100,9 +95,6 @@
 
           <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" Margin="4,0"
                       HorizontalAlignment="Right" VerticalAlignment="Center">
-            <TextBlock Text="{Binding DatasetPath}" FontSize="12" Opacity="0.5" MaxWidth="190"
-                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"
-                       ToolTip.Tip="{Binding DatasetPath}" />
             <TextBlock Text="{Binding DatasetSummary}" FontSize="13" Opacity="0.75"
                        VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
             <TextBlock Text="{Binding DatasetStats}" FontSize="13" Opacity="0.55"
@@ -114,14 +106,10 @@
         <Grid Grid.Row="2" ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
           <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
             <TextBlock Text="{l:Loc Train.Model}" Classes="caption" VerticalAlignment="Center" />
-            <ComboBox ItemsSource="{Binding ModelFamilies}" SelectedItem="{Binding SelectedModel}"
-                      MinWidth="120" Height="28" FontSize="13">
-              <ComboBox.ItemTemplate>
-                <DataTemplate x:DataType="vm:ModelOption">
-                  <TextBlock Text="{Binding Name}" />
-                </DataTemplate>
-              </ComboBox.ItemTemplate>
-            </ComboBox>
+            <TextBlock Text="{Binding ModelNameText}" Classes="value" />
+            <TextBlock Text="{l:Loc Train.Scale}" Classes="caption" VerticalAlignment="Center"
+                       Margin="6,0,0,0" ToolTip.Tip="{l:Loc Train.ScaleTip}" />
+            <TextBlock Text="{Binding ScaleText}" Classes="value" />
             <Button Content="{l:Loc Train.ExportOnnx}" Padding="10,2" FontSize="13" Click="OnExportOnnx"
                     ToolTip.Tip="{l:Loc Train.ExportOnnxTip}" />
             <Button Content="{l:Loc Train.ExportWeights}" Padding="10,2" FontSize="13" Click="OnExportWeights"
@@ -129,16 +117,7 @@
 
             <Border Width="1" Height="20" Background="{DynamicResource PanelBorderBrush}" Margin="2,0" />
 
-            <!-- 检测用哪个模型：三个模型的 onnx 可以同时在 models 目录里，按前缀挑 -->
-            <RadioButton GroupName="DetectModel" Content="YOLOv8" FontSize="13" VerticalAlignment="Center"
-                         IsChecked="{Binding IsDetectYolov8, Mode=TwoWay}"
-                         ToolTip.Tip="{l:Loc Train.DetectModelTip}" />
-            <RadioButton GroupName="DetectModel" Content="YOLOv11" FontSize="13" VerticalAlignment="Center"
-                         IsChecked="{Binding IsDetectYolov11, Mode=TwoWay}"
-                         ToolTip.Tip="{l:Loc Train.DetectModelTip}" />
-            <RadioButton GroupName="DetectModel" Content="RF-DETR" FontSize="13" VerticalAlignment="Center"
-                         IsChecked="{Binding IsDetectRfDetr, Mode=TwoWay}"
-                         ToolTip.Tip="{l:Loc Train.DetectModelTip}" />
+            <!-- 检测只用当前训练配置的模型：{模型名}_{规模}.onnx，不再单选 -->
             <Button Content="{l:Loc Train.Detect}" Padding="10,2" FontSize="13" Click="OnDetect"
                     ToolTip.Tip="{l:Loc Train.DetectTip}" />
           </StackPanel>

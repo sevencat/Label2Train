@@ -43,8 +43,12 @@ public class TrainViewTests
         Assert.Contains(Localizer.Instance.Get("Train.ProductFile"), texts);
     }
 
+    /// <summary>
+    /// 训练目标入口只剩一个「训练目标设置…」：项目、模型、规模、参数都在对话框里配。
+    /// 页面上不该再有 YOLO / RF-DETR 数据集按钮，也不该再有检测模型单选。
+    /// </summary>
     [AvaloniaFact]
-    public async Task Model_Picker_Is_Populated_From_ViewModel()
+    public async Task Target_Setup_Replaces_Dataset_Shortcuts()
     {
         await using AppTestHost host = AppTestHost.Create();
         MainWindow window = host.CreateMainWindow();
@@ -53,28 +57,35 @@ public class TrainViewTests
         TestUi.SwitchToTraining(window);
 
         TrainView view = TestUi.Train(window);
-        List<ComboBox> pickers = [.. view.GetVisualDescendants().OfType<ComboBox>()];
 
-        // 页面上不止一个下拉（数据集 / 模型），按候选项数认出模型那个
-        ComboBox modelPicker = Assert.Single(
-            pickers,
-            picker => picker.ItemCount == host.ViewModel.Train.ModelFamilies.Count);
+        List<Button> buttons = [.. view.GetVisualDescendants().OfType<Button>()];
 
-        Assert.Same(host.ViewModel.Train.SelectedModel, modelPicker.SelectedItem);
+        Assert.DoesNotContain(buttons, button => button.Content is "YOLO" or "RF-DETR");
+        Assert.Contains(
+            buttons,
+            button => button.Content as string == Localizer.Instance.Get("Train.TargetSetup"));
+
+        // 检测只用当前训练配置的模型，页面上不再有模型单选
+        Assert.DoesNotContain(
+            view.GetVisualDescendants().OfType<RadioButton>(),
+            radio => radio.Content is "YOLOv8" or "YOLOv11" or "RF-DETR");
     }
 
-    /// <summary>参数对话框要能起来：x:Name 写错、提示控件缺失都会在这里炸，而不是在用户点「修改」的时候。</summary>
+    /// <summary>run 目录跟着库走（&lt;库根&gt;/runs），不再读「上次数据集目录」。</summary>
     [AvaloniaFact]
-    public void Params_Dialog_Opens_With_Detr_Hints()
+    public async Task Output_Directory_Defaults_To_Library_Runs()
     {
-        var dialog = new TrainingParamsDialog(100m, 4m, 640m, "rfdetr");
+        await using AppTestHost host = AppTestHost.Create();
 
-        Assert.NotNull(dialog);
+        string output = host.ViewModel.Train.OutputDirectory;
+
+        Assert.StartsWith(host.Root, output, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("runs", Path.GetFileName(output));
     }
 
-    /// <summary>三个检测单选的绑定：点哪个就换哪个模型，检测时按它的前缀取 onnx。</summary>
+    /// <summary>模型与规模现在是只读文本：训练页一个下拉都没有，值跟着训练目标设置变。</summary>
     [AvaloniaFact]
-    public async Task Detect_Model_Radios_Switch_Selection()
+    public async Task Model_And_Scale_Are_Read_Only()
     {
         await using AppTestHost host = AppTestHost.Create();
         MainWindow window = host.CreateMainWindow();
@@ -83,23 +94,71 @@ public class TrainViewTests
         TestUi.SwitchToTraining(window);
 
         TrainView view = TestUi.Train(window);
-        List<RadioButton> radios =
-        [
-            .. view.GetVisualDescendants()
-                .OfType<RadioButton>()
-                .Where(radio => radio.Content is "YOLOv8" or "YOLOv11" or "RF-DETR")
-        ];
+        TrainViewModel train = host.ViewModel.Train;
 
-        Assert.Equal(3, radios.Count);
-        Assert.Equal("yolov8", host.ViewModel.Train.SelectedDetectModel.FilePrefix);
+        Assert.Empty(view.GetVisualDescendants().OfType<ComboBox>());
 
-        radios.Single(radio => (string?)radio.Content == "RF-DETR").IsChecked = true;
-        Assert.Equal("rfdetr", host.ViewModel.Train.SelectedDetectModel.FilePrefix);
-        Assert.True(host.ViewModel.Train.IsDetectRfDetr);
+        Assert.Equal(train.SelectedModel!.Name, train.ModelNameText);
+        Assert.Equal(train.SelectedScale!.Name, train.ScaleText);
 
-        radios.Single(radio => (string?)radio.Content == "YOLOv11").IsChecked = true;
-        Assert.Equal("yolov11", host.ViewModel.Train.SelectedDetectModel.FilePrefix);
-        Assert.True(host.ViewModel.Train.IsDetectYolov11);
+        // RF-DETR 不看规模，只读显示成「不适用」
+        train.SelectedModel = train.ModelFamilies.Single(model => model.Id == "rfdetr");
+        Assert.Equal(Localizer.Instance.Get("Train.ScaleNA"), train.ScaleText);
+    }
+
+    /// <summary>训练目标设置对话框：项目 / 模型 / 规模三个下拉都在，RF-DETR 时规模置灰。</summary>
+    [AvaloniaFact]
+    public void Target_Dialog_Has_Project_Model_Scale()
+    {
+        var dialog = new TrainingTargetDialog(
+            [new TinyLabelProjectSummary(1, "demo", "", 10, 8, 2, DateTime.UnixEpoch, null, [])],
+            1,
+            [new ModelOption("v8", "YOLOv8"), new ModelOption("rfdetr", "RF-DETR")],
+            [new ScaleOption("n", "n · nano"), new ScaleOption("s", "s · small")],
+            "v8",
+            "n",
+            100m,
+            4m,
+            640m);
+
+        ComboBox projectBox = Assert.IsType<ComboBox>(dialog.FindControl<Control>("ProjectBox"));
+        ComboBox modelBox = Assert.IsType<ComboBox>(dialog.FindControl<Control>("ModelBox"));
+        ComboBox scaleBox = Assert.IsType<ComboBox>(dialog.FindControl<Control>("ScaleBox"));
+
+        Assert.Equal(1, projectBox.ItemCount);
+        Assert.True(scaleBox.IsEnabled);
+
+        modelBox.SelectedIndex = 1;
+        Assert.False(scaleBox.IsEnabled);
+    }
+
+    /// <summary>
+    /// 检测只认当前训练配置的模型：<c>models/{模型名}_{规模}.onnx</c>，换规模就换文件，
+    /// 不拿上一档的权重顶上去（结构不同，框会整体错）。
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Detect_Uses_Current_Training_Config()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+
+        await host.ViewModel.GenerateSyntheticProjectAsync(
+            new SyntheticProjectDraft("检测用", 3, 64, 48, 1, 2, 0.0));
+
+        TrainViewModel train = host.ViewModel.Train;
+        IReadOnlyList<TinyLabelProjectSummary> projects = await train.ListLibraryProjectsAsync();
+        await train.OpenLibraryProjectAsync(projects[0].Id, projects[0].Name);
+
+        string directory = train.ExportDirectory;
+        Directory.CreateDirectory(directory);
+
+        File.WriteAllBytes(Path.Combine(directory, "yolov8_n.onnx"), [0]);
+        Assert.Equal(Path.Combine(directory, "yolov8_n.onnx"), train.ResolveDetectModelPath());
+
+        train.SelectedScale = train.ModelScales.Single(scale => scale.Id == "s");
+        Assert.Equal(string.Empty, train.ResolveDetectModelPath());
+
+        File.WriteAllBytes(Path.Combine(directory, "yolov8_s.onnx"), [0]);
+        Assert.Equal(Path.Combine(directory, "yolov8_s.onnx"), train.ResolveDetectModelPath());
     }
 
     /// <summary>没有打开数据集时「开始训练」必须是灰的：按钮的 IsEnabled 绑定也要真生效，而不只是 VM 属性为 false。</summary>

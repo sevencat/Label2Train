@@ -42,7 +42,7 @@ public partial class TrainViewModel : ObservableObject
     /// <summary>当前数据集里的图片张数：0 张时不让开始训练（空数据集只会训出 NaN）。</summary>
     private int _imageCount;
 
-    /// <summary>当前数据集来自哪个标注项目；0 表示外部目录（没有项目目录可放模型）。</summary>
+    /// <summary>当前数据集来自哪个标注项目；0 表示还没选项目（此时导出退回输出目录）。</summary>
     private long _projectId;
 
     private CancellationTokenSource? _training;
@@ -88,62 +88,44 @@ public partial class TrainViewModel : ObservableObject
     private ModelOption? _selectedModel;
 
     /// <summary>
-    /// 检测用的模型（界面上三个单选）：Id 只用于判断家族，<see cref="DetectModelOption.FilePrefix"/>
-    /// 就是导出文件名前缀，选中哪个就去 models 目录取 <c>{前缀}.onnx</c>。
+    /// YOLO 的规模（ultralytics 的 n / s / m / l / x，对应 yolov8n … yolov8x）。
+    /// 只对 YOLO 家族生效：RF-DETR 的体量由它自己的 queries / 层数决定，不看这个。
+    /// 换规模等于换网络结构，旧权重不能接着训，只能重新训练。
     /// </summary>
-    public IReadOnlyList<DetectModelOption> DetectModels { get; } =
+    public IReadOnlyList<ScaleOption> ModelScales { get; } =
     [
-        new DetectModelOption("yolov8", "YOLOv8", "yolov8"),
-        new DetectModelOption("yolov11", "YOLOv11", "yolov11"),
-        new DetectModelOption("rfdetr", "RF-DETR", "rfdetr"),
+        new ScaleOption("n", "n · nano"),
+        new ScaleOption("s", "s · small"),
+        new ScaleOption("m", "m · medium"),
+        new ScaleOption("l", "l · large"),
+        new ScaleOption("x", "x · xlarge"),
     ];
 
-    /// <summary>检测用哪个模型推理。</summary>
+    /// <summary>当前规模；训练时原样传给 run option 的 Scale（默认 n，与之前固定值一致）。</summary>
     [ObservableProperty]
-    private DetectModelOption _selectedDetectModel = null!;
+    private ScaleOption? _selectedScale;
 
-    public bool IsDetectYolov8
-    {
-        get => SelectedDetectModel.Id == "yolov8";
-        set
-        {
-            if (value)
-            {
-                SelectedDetectModel = DetectModels[0];
-            }
-        }
-    }
+    /// <summary>规模下拉只在 YOLO 家族下有用，选到 RF-DETR 就置灰。</summary>
+    public bool IsScaleEnabled => !TrainingPresets.IsDetrFamily(SelectedModel?.Id);
 
-    public bool IsDetectYolov11
-    {
-        get => SelectedDetectModel.Id == "yolov11";
-        set
-        {
-            if (value)
-            {
-                SelectedDetectModel = DetectModels[1];
-            }
-        }
-    }
+    /// <summary>主界面「模型」只读显示：家族名。</summary>
+    public string ModelNameText => SelectedModel?.Name ?? string.Empty;
 
-    public bool IsDetectRfDetr
-    {
-        get => SelectedDetectModel.Id == "rfdetr";
-        set
-        {
-            if (value)
-            {
-                SelectedDetectModel = DetectModels[2];
-            }
-        }
-    }
+    /// <summary>主界面「规模」只读显示：RF-DETR 不看规模，显示为「不适用」。</summary>
+    public string ScaleText => IsScaleEnabled
+        ? SelectedScale?.Name ?? string.Empty
+        : Loc.Get("Train.ScaleNA");
 
-    partial void OnSelectedDetectModelChanged(DetectModelOption value)
-    {
-        OnPropertyChanged(nameof(IsDetectYolov8));
-        OnPropertyChanged(nameof(IsDetectYolov11));
-        OnPropertyChanged(nameof(IsDetectRfDetr));
-    }
+    /// <summary>「模型名 规模」拼一段：摘要、检测提示都按这个说法。</summary>
+    public string ModelText => IsScaleEnabled
+        ? $"{SelectedModel?.Name} {SelectedScale?.Id}"
+        : SelectedModel?.Name ?? string.Empty;
+
+    /// <summary>主界面「训练目标」一行摘要：项目 · 模型 规模；参数在右边单独只读展示。</summary>
+    public string TargetSummary => Loc.Format(
+        "Train.TargetSummary",
+        string.IsNullOrWhiteSpace(DatasetPath) ? Loc.Get("Train.NoDataset") : DatasetPath,
+        ModelText);
 
     /// <summary>最近一次导出的 ONNX 路径（只用于展示与日志；检测走的是单选对应的前缀文件）。</summary>
     public string LastOnnxPath { get; private set; } = string.Empty;
@@ -155,20 +137,48 @@ public partial class TrainViewModel : ObservableObject
 
     public string ImageSizeText => ((int)ImageSize).ToString(CultureInfo.InvariantCulture);
 
-    partial void OnEpochsChanged(decimal value) => OnPropertyChanged(nameof(EpochsText));
+    partial void OnEpochsChanged(decimal value)
+    {
+        OnPropertyChanged(nameof(EpochsText));
+        OnPropertyChanged(nameof(TargetSummary));
+    }
 
-    partial void OnBatchSizeChanged(decimal value) => OnPropertyChanged(nameof(BatchSizeText));
+    partial void OnBatchSizeChanged(decimal value)
+    {
+        OnPropertyChanged(nameof(BatchSizeText));
+        OnPropertyChanged(nameof(TargetSummary));
+    }
 
     partial void OnImageSizeChanged(decimal value)
     {
         OnPropertyChanged(nameof(ImageSizeText));
+        OnPropertyChanged(nameof(TargetSummary));
         RaiseRunState();
     }
+
+    partial void OnDatasetPathChanged(string value) => OnPropertyChanged(nameof(TargetSummary));
 
     partial void OnSelectedModelChanged(ModelOption? value)
     {
         RaiseRunState();
+        OnPropertyChanged(nameof(IsScaleEnabled));
+        OnPropertyChanged(nameof(ModelKey));
+        OnPropertyChanged(nameof(ModelNameText));
+        OnPropertyChanged(nameof(ScaleText));
+        OnPropertyChanged(nameof(ModelText));
+        OnPropertyChanged(nameof(TargetSummary));
+        SyncOutputDirectory();
         ReportImageSizeIfBlocked();
+    }
+
+    /// <summary>换规模就是换网络结构：产物目录跟着换成 <c>models/yolov8_m</c> 这一档。</summary>
+    partial void OnSelectedScaleChanged(ScaleOption? value)
+    {
+        OnPropertyChanged(nameof(ModelKey));
+        OnPropertyChanged(nameof(ScaleText));
+        OnPropertyChanged(nameof(ModelText));
+        OnPropertyChanged(nameof(TargetSummary));
+        SyncOutputDirectory();
     }
 
     /// <summary>
@@ -213,7 +223,14 @@ public partial class TrainViewModel : ObservableObject
     private const string AxisTextColor = "#37474F";
     private const string GridColor = "#CFD8DC";
 
+    // 三条线要在白底上一眼分清：以前 mAP50 绿、loss 青绿、mAP50-95 深紫，
+    // 绿和青绿几乎同色，曲线叠在一起时看不出哪条是哪条。改成蓝 / 品红 / 橙三个相差大的色相。
+    private const string Map50Color = "#1565C0";
+    private const string Map5095Color = "#D81B60";
+    private const string LossColor = "#EF6C00";
+
     private readonly LinearAxis _epochAxis;
+    private readonly LinearAxis _mapAxis;
     private readonly LinearAxis _lossAxis;
     private readonly LineSeries _map50Series;
     private readonly LineSeries _map5095Series;
@@ -308,17 +325,17 @@ public partial class TrainViewModel : ObservableObject
         _database = database;
         _exporter = exporter;
         _selectedModel = ModelFamilies[0];
-        _selectedDetectModel = DetectModels[0];
+        _selectedScale = ModelScales[0];
 
         // 轴范围一律给实数：OxyPlot 2.x 在算刻度时会对 NaN 取符号，
         // 一旦某根轴的 Minimum/Maximum 是 NaN 就抛 ArithmeticException，整张图都画不出来
         _epochAxis = CreateAxis("epoch", AxisPosition.Bottom, minimum: 0, maximum: 10, minimumStep: 1);
-        LinearAxis mapAxis = CreateAxis("mAP", AxisPosition.Left, minimum: 0, maximum: 1, minimumStep: 0.1);
+        _mapAxis = CreateAxis("mAP", AxisPosition.Left, minimum: 0, maximum: 1, minimumStep: 0.05);
         _lossAxis = CreateAxis("loss", AxisPosition.Right, minimum: 0, maximum: 1);
 
-        _map50Series = CreateSeries("mAP50", "#2E7D32", mapAxis.Key);
-        _map5095Series = CreateSeries("mAP50-95", "#6A1B9A", mapAxis.Key);
-        _lossSeries = CreateSeries("loss", "#00796B", _lossAxis.Key);
+        _map50Series = CreateSeries("mAP50", Map50Color, _mapAxis.Key);
+        _map5095Series = CreateSeries("mAP50-95", Map5095Color, _mapAxis.Key);
+        _lossSeries = CreateSeries("loss", LossColor, _lossAxis.Key);
 
         Plot = new PlotModel
         {
@@ -341,17 +358,15 @@ public partial class TrainViewModel : ObservableObject
         });
 
         Plot.Axes.Add(_epochAxis);
-        Plot.Axes.Add(mapAxis);
+        Plot.Axes.Add(_mapAxis);
         Plot.Axes.Add(_lossAxis);
 
         Plot.Series.Add(_map50Series);
         Plot.Series.Add(_map5095Series);
         Plot.Series.Add(_lossSeries);
 
-        if (!string.IsNullOrWhiteSpace(settings.LastTrainDataDirectory))
-        {
-            OutputDirectory = Path.Combine(settings.LastTrainDataDirectory, "runs");
-        }
+        // 训练产物跟着库里的项目走：选过项目就是 projects/{id}/runs，没选就是库目录下的 runs。
+        OutputDirectory = RunDirectoryFor(projectId: 0);
 
         logger.LogInformation("训练工作台已创建，等待选择数据集");
 
@@ -393,38 +408,6 @@ public partial class TrainViewModel : ObservableObject
     }
 
     // ── 数据集 ────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// 打开外部数据集目录。<paramref name="format"/> 为 <c>null</c> 时交给探测器自己判断，
-    /// 指定了（YOLO / COCO / TinyLabel）就按该格式打开。
-    /// </summary>
-    public async Task OpenDatasetAsync(string path, DatasetFormat? format = null, CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return;
-        }
-
-        Status = Localizer.Instance.Get("Train.Opening");
-
-        try
-        {
-            DatasetOpenResult opened = await _resolver
-                .OpenAsync(StorageLocation.Parse(path), format, datasetId: null, ct)
-                .ConfigureAwait(true);
-
-            await ApplyOpenedAsync(opened, path, ct).ConfigureAwait(true);
-
-            _settings.LastTrainDataDirectory = Path.GetDirectoryName(path) ?? string.Empty;
-            SaveSettings();
-        }
-        catch (Exception error)
-        {
-            _logger.LogError(error, "打开数据集失败");
-            Status = Localizer.Instance.Format("Train.OpenFailed", error.Message);
-            AppendLog(Status);
-        }
-    }
 
     /// <summary>
     /// 列出库（<c>label2train.db</c>）里的标注项目：训练的输入就是标注端写进去的这些项目，
@@ -511,9 +494,6 @@ public partial class TrainViewModel : ObservableObject
 
             await ApplyOpenedAsync(opened, $"{project.Name} · #{project.Id}", ct, project.Id)
                 .ConfigureAwait(true);
-
-            _settings.LastTrainDataDirectory = folder;
-            SaveSettings();
         }
         catch (Exception error)
         {
@@ -551,6 +531,9 @@ public partial class TrainViewModel : ObservableObject
     /// <summary>上次在标注库里选来训练的项目 Id；0 表示没记过。</summary>
     public long LastLibraryProjectId => _settings.LastTrainLibraryProjectId;
 
+    /// <summary>当前数据集所属项目 Id；0 表示还没选项目（「训练目标设置」据此判断要不要重新拉数据）。</summary>
+    public long ProjectId => _projectId;
+
     /// <summary>打开标注库里的某个项目当训练数据集，并记住项目 Id（下次启动自动恢复）。</summary>
     public async Task OpenLibraryProjectAsync(
         long projectId,
@@ -581,7 +564,6 @@ public partial class TrainViewModel : ObservableObject
             await ApplyOpenedAsync(opened, source, ct, projectId).ConfigureAwait(true);
 
             _settings.LastTrainLibraryProjectId = projectId;
-            _settings.LastTrainDataDirectory = folder;
             SaveSettings();
         }
         catch (Exception error)
@@ -594,7 +576,7 @@ public partial class TrainViewModel : ObservableObject
 
     /// <summary>
     /// 打开成功后统一收尾：换掉旧数据集、算摘要与统计、记类别。
-    /// <paramref name="projectId"/> 是数据集所属的标注项目（外部目录传 0），导出时据此决定模型落在哪。
+    /// <paramref name="projectId"/> 是数据集所属的标注项目，run 目录与导出目录都跟着它走。
     /// </summary>
     private async Task ApplyOpenedAsync(
         DatasetOpenResult opened,
@@ -605,6 +587,9 @@ public partial class TrainViewModel : ObservableObject
         (_store as IDisposable)?.Dispose();
         _store = opened.Store;
         _projectId = projectId;
+
+        // 换项目就把 run 目录切到该项目下，产物不会攒在共用的 runs 里分不清是谁的。
+        OutputDirectory = RunDirectoryFor(projectId);
 
         DatasetPath = source;
         DatasetSummary = $"{opened.Store.Format.ToDisplayName()} · split {string.Join(" / ", opened.Store.Splits)} · " +
@@ -637,8 +622,63 @@ public partial class TrainViewModel : ObservableObject
     // ── 训练 ──────────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// 当前训练配置的产物名：<c>yolov8_s</c> / <c>yolov11_m</c>；RF-DETR 没有规模字母，就叫 <c>rfdetr</c>。
+    /// run 目录与导出的模型文件名都用它，一个「模型 + 规模」一套产物。
+    /// </summary>
+    public string ModelKey
+    {
+        get
+        {
+            string family = SelectedModel?.Id switch
+            {
+                "v11" => "yolov11",
+                "rfdetr" => "rfdetr",
+                _ => "yolov8",
+            };
+
+            return IsScaleEnabled ? $"{family}_{SelectedScale?.Id ?? "n"}" : family;
+        }
+    }
+
+    /// <summary>
+    /// 训练 run 目录：<c>projects/{id}/models/{模型名_规模}</c>，例如
+    /// <c>data/projects/2/models/yolov8_s</c>。权重、优化器状态、train.json 都写在这里，
+    /// 导出时从上一层的 <c>models</c> 取 <c>best.safetensors</c>，落成 <c>yolov8_s.onnx</c>。
+    /// 还没选项目时退回 <c>{库根}/runs</c>，库路径异常时再用数据目录兜底。
+    /// </summary>
+    private string RunDirectoryFor(long projectId)
+    {
+        string? root = Path.GetDirectoryName(_database.Path);
+
+        if (string.IsNullOrWhiteSpace(root) || projectId <= 0)
+        {
+            return string.IsNullOrWhiteSpace(root)
+                ? Path.Combine(AppDataPaths.DataDirectory, "runs")
+                : Path.Combine(root, "runs");
+        }
+
+        return Path.Combine(
+            TinyLabelWorkspace.ModelDirectory(StorageLocation.FromPath(root), projectId),
+            ModelKey);
+    }
+
+    /// <summary>
+    /// 模型 / 规模下拉一变就重算输出目录：换家族或换规模等于换一套产物，
+    /// 新权重不能写进旧模型目录。训练中不动——跑着的任务已经拿着旧路径。
+    /// </summary>
+    private void SyncOutputDirectory()
+    {
+        if (IsTraining)
+        {
+            return;
+        }
+
+        OutputDirectory = RunDirectoryFor(_projectId);
+    }
+
+    /// <summary>
     /// 导出目的地：训练数据来自标注库里的项目时进 <c>projects/{id}/models</c>（模型跟着项目走），
-    /// 外部目录数据集没有项目目录，退回 <c>{输出目录}/export</c>。
+    /// 还没选项目时退回 <c>{输出目录}/export</c>。
     /// YOLO / RF-DETR / TinyLabel 产物都走同一个目录，只是文件名由架构决定。
     /// </summary>
     public string ExportDirectory
@@ -657,44 +697,29 @@ public partial class TrainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 当前检测单选对应的 ONNX 路径，严格按前缀取：选 YOLOv8 就是 <c>yolov8.onnx</c>，
-    /// 选 YOLOv11 就是 <c>yolov11.onnx</c>，选 RF-DETR 就是 <c>rfdetr.onnx</c>；找不到返回空串。
-    /// 这里不做跨前缀回退——拿别的家族的权重去推理只会得到乱框或者直接崩，
-    /// 比「提示缺模型」糟得多。
+    /// 检测只用当前训练配置的模型：<c>models/{模型名}_{规模}.onnx</c>，对应哪个文件由
+    /// <see cref="ModelKey"/> 决定。不做跨规模 / 跨家族回退——ONNX 的输出层跟网络结构绑定，
+    /// 拿别的权重顶上去只会得到乱框或直接崩，比「提示缺模型」糟得多。
     /// </summary>
     public string ResolveDetectModelPath()
     {
-        string directory = ExportDirectory;
-        string preferred = Path.Combine(directory, SelectedDetectModel.FilePrefix + ".onnx");
+        string path = Path.Combine(ExportDirectory, ModelKey + ".onnx");
 
-        if (File.Exists(preferred))
-        {
-            return preferred;
-        }
-
-        // 旧版本导出统一叫 best.onnx，且只有 YOLO 一个家族；v11 的权重长什么样无从得知，
-        // 所以只给 YOLOv8 兼容这一份
-        if (SelectedDetectModel.Id == "yolov8")
-        {
-            string legacy = Path.Combine(directory, TrainingExportService.OnnxFileName);
-
-            return File.Exists(legacy) ? legacy : string.Empty;
-        }
-
-        return string.Empty;
+        return File.Exists(path) ? path : string.Empty;
     }
 
-    /// <summary>选的模型还没导出时给用户看的话：缺哪个文件、怎么生成。</summary>
+    /// <summary>当前训练配置还没导出模型时给用户看的话：缺哪个文件、怎么生成。</summary>
     public string DescribeMissingDetectModel() => Loc.Format(
         "Train.DetectModelMissing",
-        SelectedDetectModel.Name,
-        SelectedDetectModel.FilePrefix + ".onnx");
+        ModelText,
+        ModelKey + ".onnx");
 
     /// <summary>
-    /// 导出当前训练产物到 <see cref="ExportDirectory"/>：<c>{模型名}.safetensors</c> +
-    /// <c>{模型名}.json</c>，<paramref name="withOnnx"/> 为真时再导出一份 <c>{模型名}.onnx</c>；
-    /// 文件名前缀按架构自动取（yolov8 / yolov11 / rfdetr），导出的 ONNX 之后直接给「检测」用。
-    /// 返回是否成功（训练结束后的自动导出据此决定状态行怎么写）。
+    /// 导出当前训练产物到 <see cref="ExportDirectory"/>：<c>{模型名}_{规模}.safetensors</c> +
+    /// <c>{模型名}_{规模}.json</c>，<paramref name="withOnnx"/> 为真时再导出 <c>{模型名}_{规模}.onnx</c>；
+    /// 文件名由权重里的 architecture 决定（yolov8_s / yolov11_m / rfdetr），不是读界面下拉，
+    /// 免得训练完改了下拉就把 A 的权重导成 B 的名字。导出的 ONNX 之后直接给「检测」用。
+    /// 返回是否成功（训练结束 / 用户停止后的自动导出据此决定状态行怎么写）。
     /// </summary>
     public async Task<bool> ExportAsync(bool withOnnx, CancellationToken ct = default)
     {
@@ -712,15 +737,7 @@ public partial class TrainViewModel : ObservableObject
             {
                 LastOnnxPath = onnx;
 
-                // 检测单选跟着刚导出的模型走：三个模型共存时，用户不用自己去对文件名
-                string prefix = Path.GetFileNameWithoutExtension(onnx);
-
-                if (DetectModels.FirstOrDefault(model => model.FilePrefix == prefix) is { } matched)
-                {
-                    SelectedDetectModel = matched;
-                }
-
-                // AI 标注从这个设置取模型：导出后直接指向新模型，重启也不用再挑文件
+                // 检测直接拿这个文件；AI 标注也从这个设置取模型，重启不用再挑
                 _settings.AutoLabelModelPath = onnx;
                 SaveSettings();
             }
@@ -742,8 +759,8 @@ public partial class TrainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 训练一结束就把模型导到项目目录（含 ONNX），检测/AI 标注立刻能用；
-    /// 摘要 runner 或干跑不写权重时静默跳过。
+    /// 训练结束或用户停止后把 best 导到项目目录（含 ONNX），检测/AI 标注立刻能用；
+    /// 一轮都还没评估过（没有 best.safetensors）时静默跳过。
     /// </summary>
     private async Task AutoExportAsync(CancellationToken ct)
     {
@@ -776,7 +793,11 @@ public partial class TrainViewModel : ObservableObject
         IsPaused = false;
         Progress = 0;
         ClearChart();
-        RunInfo = $"epochs {Epochs:0} · batch {BatchSize:0} · imgsz {ImageSize:0}";
+
+        // 规模只对 YOLO 有意义；RF-DETR 走自己的结构，不拼这个后缀
+        string scale = IsScaleEnabled ? SelectedScale?.Id ?? "n" : string.Empty;
+        RunInfo = $"epochs {Epochs:0} · batch {BatchSize:0} · imgsz {ImageSize:0}"
+            + (scale.Length > 0 ? $" · scale {scale}" : string.Empty);
 
         Status = Localizer.Instance.Get("Train.Training");
         AppendLog(Localizer.Instance.Format("Train.Started", DatasetPath));
@@ -799,6 +820,7 @@ public partial class TrainViewModel : ObservableObject
                 Epochs: (int)Epochs,
                 BatchSize: (int)BatchSize,
                 ImageSize: (int)ImageSize,
+                Scale: scale.Length > 0 ? scale : "n",
                 Family: SelectedModel?.Id ?? "v8")
             {
                 Progress = progress,
@@ -819,16 +841,17 @@ public partial class TrainViewModel : ObservableObject
                 AppendLog($"  ! {warning}");
             }
 
-            // 训练完自动导出：best.safetensors + model.json + best.onnx 落到项目目录 models/
+            // 训练结束自动导出：{模型名}_{规模}.onnx 落进项目目录 models/
             await AutoExportAsync(_training.Token).ConfigureAwait(true);
-
-            _settings.LastTrainDataDirectory = Path.GetDirectoryName(DatasetPath) ?? _settings.LastTrainDataDirectory;
-            SaveSettings();
         }
         catch (OperationCanceledException)
         {
             Status = Localizer.Instance.Get("Train.Stopped");
             AppendLog(Status);
+
+            // 用户主动停止也要出模型：runner 每轮评估都会留 best，把已有的那份导出去。
+            // 这里必须传 None——_training.Token 已经取消，再传进去导出会立刻被中止。
+            await AutoExportAsync(CancellationToken.None).ConfigureAwait(true);
         }
         catch (Exception error)
         {
@@ -927,6 +950,15 @@ public partial class TrainViewModel : ObservableObject
             _lossAxis.Maximum = Math.Max(_lossAxis.Maximum, loss * 1.2);
         }
 
+        // mAP 早期经常只有 0.00x：轴固定 0~1 的话线贴着底边，看着就像「没有数据」。
+        // 按当前最好成绩把轴放大一点（至少留 0.1，封顶 1），小幅进步也能看见
+        double bestMap = Math.Max(double.IsFinite(map50) ? map50 : 0, double.IsFinite(map5095) ? map5095 : 0);
+
+        if (bestMap > 0)
+        {
+            _mapAxis.Maximum = Math.Max(0.1, Math.Min(1d, Math.Ceiling(bestMap * 10) / 10 * 1.2));
+        }
+
         HasChartData = true;
         Plot.InvalidatePlot(updateData: true);
     }
@@ -939,6 +971,7 @@ public partial class TrainViewModel : ObservableObject
         _lossSeries.Points.Clear();
 
         _epochAxis.Maximum = 10;
+        _mapAxis.Maximum = 1;
         _lossAxis.Maximum = 1;
         HasChartData = false;
         Plot.InvalidatePlot(updateData: true);
@@ -976,7 +1009,8 @@ public partial class TrainViewModel : ObservableObject
         {
             Title = title,
             Color = OxyColor.Parse(color),
-            StrokeThickness = 2,
+            // 2px 在低分屏上细得几乎看不见，加粗到 2.5 让三条线更醒目
+            StrokeThickness = 2.5,
             MarkerType = MarkerType.None,
             XAxisKey = "epoch",
             YAxisKey = yAxisKey,
@@ -1003,8 +1037,8 @@ public partial class TrainViewModel : ObservableObject
 /// <summary>训练模型家族下拉的一行；Id 直接就是 <c>TrainingRunOptions.Family</c>。</summary>
 public sealed record ModelOption(string Id, string Name);
 
-/// <summary>「检测用哪个模型」的三个单选：<see cref="FilePrefix"/> 就是导出文件名前缀。</summary>
-public sealed record DetectModelOption(string Id, string Name, string FilePrefix);
+/// <summary>模型规模下拉的一行；Id 直接就是 <c>TrainingRunOptions.Scale</c>（n / s / m / l / x）。</summary>
+public sealed record ScaleOption(string Id, string Name);
 
 /// <summary>「标注项目」下拉的一行：项目 Id 就是打开数据集时的 datasetId。</summary>
 public sealed record ProjectOption(long Id, string Name, int ImageCount, int LabeledCount)

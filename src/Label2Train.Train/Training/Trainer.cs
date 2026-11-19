@@ -222,7 +222,16 @@ public sealed class Trainer
             }
 
             if (batchCount == 0)
+            {
+                // 刚进新的 epoch 就按了停止 / 取消：第一批还没开始跑，属于正常收尾，
+                // 不能报「没有产生任何批次」把用户吓一跳（日志里会变成一条训练失败）
+                if (stopped)
+                {
+                    break;
+                }
+
                 throw new InvalidOperationException($"第 {epoch} 个 epoch 没有产生任何批次。");
+            }
 
             LastLoss = (float)(epochLoss / batchCount);
             var metrics = new EpochMetrics(epoch, Step, LastLoss, GetLearningRate());

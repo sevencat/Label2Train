@@ -21,12 +21,6 @@ public sealed class AppSettings
     /// <summary>标注端上次打开的数据目录（含 label2train.db），启动时自动打开。</summary>
     public string LastDataDirectory { get; set; } = string.Empty;
 
-    /// <summary>
-    /// 训练端上次打开的数据集目录。与标注端的 <see cref="LastDataDirectory"/> 分开，
-    /// 否则两边互相覆盖，标注端下次启动会找不到工作区。
-    /// </summary>
-    public string LastTrainDataDirectory { get; set; } = string.Empty;
-
     /// <summary>上次在标注库里选来训练的项目 Id；0 表示还没记过（库永远是标注端当前库）。</summary>
     public long LastTrainLibraryProjectId { get; set; }
 

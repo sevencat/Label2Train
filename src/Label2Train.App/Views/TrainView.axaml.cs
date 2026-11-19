@@ -7,7 +7,6 @@ using Microsoft.Extensions.Logging;
 using Label2Train.App.Controls;
 using Label2Train.App.ViewModels;
 using Label2Train.Core.AutoLabel;
-using Label2Train.Core.Dataset;
 using Label2Train.Core.Dataset.TinyLabel;
 using Label2Train.Core.Infrastructure;
 using Label2Train.Core.Localization;
@@ -31,66 +30,14 @@ public partial class TrainView : UserControl
 
     private static Localizer Loc => Localizer.Instance;
 
-    /// <summary>「训练参数」：epochs / batch / imgsz 收进对话框改，界面只做只读展示。</summary>
-    private async void OnEditParams(object? sender, RoutedEventArgs e)
-    {
-        if (ViewModel is not { } viewModel || Owner is not { } owner)
-        {
-            return;
-        }
-
-        var dialog = new TrainingParamsDialog(
-            viewModel.Epochs,
-            viewModel.BatchSize,
-            viewModel.ImageSize,
-            viewModel.SelectedModel?.Id ?? "v8");
-
-        if (await dialog.ShowDialog<TrainParams?>(owner) is { } updated)
-        {
-            bool resized = (int)viewModel.ImageSize != updated.ImageSize;
-
-            viewModel.Epochs = updated.Epochs;
-            viewModel.BatchSize = updated.BatchSize;
-            viewModel.ImageSize = updated.ImageSize;
-
-            // imgsz 被纠正过就说一声，别让用户以为参数没保存
-            if (resized && TrainingPresets.IsDetrFamily(viewModel.SelectedModel?.Id))
-            {
-                viewModel.Report(Loc.Format("Train.ImageSizeAdjusted", updated.ImageSize));
-            }
-        }
-    }
-
-    /// <summary>「YOLO」：选目录，按 YOLO 格式打开。</summary>
-    private async void OnOpenYolo(object? sender, RoutedEventArgs e)
-        => await OpenDatasetFolderAsync(DatasetFormat.Yolo, Loc.Get("Train.OpenYoloTip"));
-
-    /// <summary>「RF-DETR」：选目录，按 COCO（RF-DETR）格式打开。</summary>
-    private async void OnOpenRfDetr(object? sender, RoutedEventArgs e)
-        => await OpenDatasetFolderAsync(DatasetFormat.Coco, Loc.Get("Train.OpenRfDetrTip"));
-
-    private async Task OpenDatasetFolderAsync(DatasetFormat format, string title)
-    {
-        if (ViewModel is not { } viewModel)
-        {
-            return;
-        }
-
-        string? folder = await PickFolderAsync(title);
-
-        if (folder is null)
-        {
-            return;
-        }
-
-        await viewModel.OpenDatasetAsync(folder, format);
-    }
-
     /// <summary>
-    /// 「TinyLabel」：库固定用标注端当前那个，只让用户挑库里的项目，
-    /// 再把该项目的图片与标注读成训练数据集。
+    /// 「训练目标设置」：项目、模型、规模、epochs / batch / imgsz 一次配好，主界面只读展示。
+    /// <para>
+    /// 训练入口只有这一条：外部 YOLO / COCO 数据集必须先在导入流程里转成库项目，
+    /// 否则训练集会绕开库，导出的模型和项目也对不上号。
+    /// </para>
     /// </summary>
-    private async void OnOpenTinyLabel(object? sender, RoutedEventArgs e)
+    private async void OnSetupTarget(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is not { } viewModel || Owner is not { } owner)
         {
@@ -105,30 +52,54 @@ public partial class TrainView : UserControl
             return;
         }
 
-        TinyLabelProjectSummary? project = await new ProjectPickerDialog(
-                projects, viewModel.LibraryFile, viewModel.LastLibraryProjectId)
-            .ShowDialog<TinyLabelProjectSummary?>(owner);
+        var dialog = new TrainingTargetDialog(
+            projects,
+            viewModel.ProjectId,
+            viewModel.ModelFamilies,
+            viewModel.ModelScales,
+            viewModel.SelectedModel?.Id ?? "v8",
+            viewModel.SelectedScale?.Id ?? "n",
+            viewModel.Epochs,
+            viewModel.BatchSize,
+            viewModel.ImageSize);
 
-        if (project is null)
+        if (await dialog.ShowDialog<TrainingTarget?>(owner) is not { } target)
         {
             return;
         }
 
-        // 打开项目 = 拉取它的图片清单与标注，顺手记住这个项目
-        await viewModel.OpenLibraryProjectAsync(project.Id, $"{project.Name} · #{project.Id}");
-    }
+        bool resized = (int)viewModel.ImageSize != target.ImageSize;
+        bool projectChanged = target.Project.Id != viewModel.ProjectId;
 
-    private async void OnPickOutput(object? sender, RoutedEventArgs e)
-    {
-        string? folder = await PickFolderAsync(Loc.Get("Train.OutputDir"));
+        // 先落模型与规模：OutputDirectory 跟着 ModelKey 走，随后打开项目时会按新项目 + 新模型再派生一次；
+        // 顺序反了就会先用旧模型名建目录，白跑一趟
+        viewModel.SelectedModel = viewModel.ModelFamilies
+            .FirstOrDefault(model => model.Id == target.FamilyId) ?? viewModel.SelectedModel;
+        viewModel.SelectedScale = viewModel.ModelScales
+            .FirstOrDefault(scale => scale.Id == target.ScaleId) ?? viewModel.SelectedScale;
+        viewModel.Epochs = target.Epochs;
+        viewModel.BatchSize = target.BatchSize;
+        viewModel.ImageSize = target.ImageSize;
 
-        if (folder is not null && ViewModel is { } viewModel)
+        // 换项目 = 重新拉图片清单与标注，顺手记住这个项目
+        if (projectChanged)
         {
-            viewModel.OutputDirectory = folder;
+            await viewModel.OpenLibraryProjectAsync(
+                target.Project.Id,
+                $"{target.Project.Name} · #{target.Project.Id}");
+        }
+
+        // imgsz 被纠正过就说一声，别让用户以为参数没保存
+        if (resized && TrainingPresets.IsDetrFamily(target.FamilyId))
+        {
+            viewModel.Report(Loc.Format("Train.ImageSizeAdjusted", target.ImageSize));
         }
     }
 
-    /// <summary>「导出 ONNX」：把最优权重导成 best.onnx，之后「检测」直接用它。</summary>
+    /// <summary>
+    /// 「导出 ONNX」：把最优权重导成 <c>{模型名}_{规模}.onnx</c> 放进项目 models 目录，
+    /// 之后「检测」直接用它。
+    /// </summary>
     private async void OnExportOnnx(object? sender, RoutedEventArgs e)
     {
         if (ViewModel is { } viewModel)
@@ -243,7 +214,7 @@ public partial class TrainView : UserControl
             return;
         }
 
-        // 单选定的哪个模型就用哪个：yolov8.onnx / yolov11.onnx / rfdetr.onnx。
+        // 只用当前训练配置的模型：{模型名}_{规模}.onnx。
         // 找不到就明确报缺文件，绝不悄悄换成别的模型（换了框会整体错、甚至崩在输出名上）
         string modelPath = viewModel.ResolveDetectModelPath();
 
@@ -289,21 +260,6 @@ public partial class TrainView : UserControl
         {
             // 配置写不进去不影响本次检测
         }
-    }
-
-    private async Task<string?> PickFolderAsync(string title)
-    {
-        IStorageProvider? storage = TopLevel.GetTopLevel(this)?.StorageProvider;
-
-        if (storage is null)
-        {
-            return null;
-        }
-
-        IReadOnlyList<IStorageFolder> folders = await storage.OpenFolderPickerAsync(
-            new FolderPickerOpenOptions { Title = title, AllowMultiple = false });
-
-        return folders.Count == 0 ? null : folders[0].TryGetLocalPath();
     }
 
     private async Task<string?> PickFileAsync(

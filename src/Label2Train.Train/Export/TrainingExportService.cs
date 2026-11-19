@@ -25,9 +25,9 @@ public sealed record TrainingExportResult(
 /// <c>{模型名}.safetensors</c> + <c>{模型名}.json</c>（架构 / 类别 / 输入尺寸），
 /// 以及可交付的 <c>{模型名}.onnx</c>。
 /// <para>
-/// 文件名前缀按架构取（<c>yolov8</c> / <c>yolov11</c> / <c>rfdetr</c> / <c>simple-detr</c>），
-/// 同一个项目的 <c>models</c> 目录里可以同时放三种模型，检测时按前缀挑：
-/// 用 <c>best</c> 做前缀的话后训练的那个会把前一个覆盖掉。
+/// 文件名按「模型名_规模」取：YOLO 是 <c>yolov8_s</c> / <c>yolov11_m</c>，DETR 是 <c>rfdetr</c> /
+/// <c>simple-detr</c>。同一个项目的 <c>models</c> 目录里可以同时放下各家族、各规模的模型，
+/// 检测时按前缀挑；不带规模的话，换规模重训会把上一份覆盖掉。
 /// </para>
 /// <para>
 /// 支持三种架构，按检查点元数据里的 <c>architecture</c> 分派：
@@ -84,6 +84,21 @@ public sealed class TrainingExportService
     }
 
     /// <summary>
+    /// 架构 → 默认产物文件名（不含扩展名）：YOLO 带规模（<c>yolov8_s</c> / <c>yolov11_m</c>），
+    /// DETR 的体量由 queries / 层数决定，没有规模字母（<c>rfdetr</c> / <c>simple-detr</c>）。
+    /// </summary>
+    public static string DefaultPrefixFor(string architecture)
+    {
+        if (!YoloArchitectures.TryParseFamily(architecture, out _))
+        {
+            return PrefixFor(architecture);
+        }
+
+        (_, YoloScale scale, _) = YoloArchitectures.Parse(architecture);
+        return $"{PrefixFor(architecture)}_{YoloScales.ToLetter(scale)}";
+    }
+
+    /// <summary>
     /// 导出。<paramref name="runDirectory"/> 是训练输出目录（里面有 best.safetensors / train.json），
     /// <paramref name="targetDirectory"/> 是导出目录（例如 <c>{输出目录}/export</c>）。
     /// <paramref name="filePrefix"/> 为空时按架构自动取名（yolov8 / yolov11 / rfdetr）。
@@ -120,8 +135,11 @@ public sealed class TrainingExportService
         int imageSize = ReadInt(checkpoint.Metadata, "image_size", 640);
         IReadOnlyList<string> classNames = ReadClassNames(runDirectory);
 
-        // 产物按模型名落盘：同一个 models 目录要能同时放 yolov8 / yolov11 / rfdetr 三个模型
-        string prefix = string.IsNullOrWhiteSpace(filePrefix) ? PrefixFor(architecture) : filePrefix.Trim();
+        // 产物按「模型名_规模」落盘：同一个 models 目录要能同时放下 yolov8_s / yolov11_m / rfdetr，
+        // 换规模重训不覆盖上一份
+        string prefix = string.IsNullOrWhiteSpace(filePrefix)
+            ? DefaultPrefixFor(architecture)
+            : filePrefix.Trim();
         string onnxName = prefix + ".onnx";
 
         string weights = Path.Combine(targetDirectory, prefix + ".safetensors");
@@ -170,9 +188,11 @@ public sealed class TrainingExportService
 
                 if (useRfDetr)
                 {
-                    // 与 DetrTrainingSession.BuildModel 的装配方式保持一致，键才对得上
+                    // 与 DetrTrainingSession.BuildModel 的装配方式保持一致，键才对得上。
+                    // 用官方权重热启动时结构是照检查点建的，所以这些值只能从元数据里读回来
                     var dinoConfig = new DinoV2Config(
-                        ImageSize: 518,
+                        ImageSize: ReadInt(checkpoint.Metadata, "dino_image", 518),
+                        PatchSize: ReadInt(checkpoint.Metadata, "dino_patch", 14),
                         EmbeddingSize: dinoEmbedding,
                         Depth: dinoDepth,
                         Heads: dinoHeads);
@@ -184,7 +204,13 @@ public sealed class TrainingExportService
                         heads,
                         device,
                         encoderLayers: encoderLayers,
-                        decoderLayers: decoderLayers);
+                        decoderLayers: decoderLayers,
+                        ffnSize: ReadInt(checkpoint.Metadata, "ffn_size", 1024),
+                        points: ReadInt(checkpoint.Metadata, "deform_points", 4),
+                        levels: ReadInt(checkpoint.Metadata, "deform_levels", RfDetrDetector.MaxLevels),
+                        decoderHeads: ReadInt(checkpoint.Metadata, "deform_heads", 0),
+                        useRefPointHead: ReadInt(checkpoint.Metadata, "ref_point", 0) != 0,
+                        useC2fProjector: ReadInt(checkpoint.Metadata, "c2f", 0) != 0);
 
                     checkpoint.LoadInto(detector, device, strict: false);
                     RfDetrOnnxExporter.Save(detector, onnx, imageSize, imageSize);

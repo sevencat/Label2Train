@@ -133,7 +133,8 @@ public sealed class TinyLabelProjectService(
             }
         }
 
-        logger?.LogWarning("已删除项目 {Id}（含图片与标注，删图片目录={DeleteImages}）", projectId, deleteImages);
+        // 用户主动删除是正常操作，用 Warning 记会让日志里出现无意义的警告
+        logger?.LogInformation("已删除项目 {Id}（含图片与标注，删图片目录={DeleteImages}）", projectId, deleteImages);
 
         return Task.CompletedTask;
     }

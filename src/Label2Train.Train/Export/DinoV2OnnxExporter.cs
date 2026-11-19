@@ -53,11 +53,51 @@ public static class DinoV2OnnxExporter
         int imageWidth,
         string outputName)
     {
+        return AppendCoreInternal(
+            builder, config, state, inputName, imageHeight, imageWidth, outputName, taps: null, out _);
+    }
+
+    /// <summary>
+    /// 与 <see cref="AppendCore"/> 相同，但按 <paramref name="tapBlocks"/> 收集中间层输出：
+    /// 每层先过最终 <c>norm</c>、去掉 cls、还原成 <c>[1,D,side,side]</c> 特征图
+    /// （对应 <c>DinoV2Backbone.ForwardTapped</c>），是官方 RF-DETR 的 C2f 投影器的输入。
+    /// 这条路径不产出最终 token 输出。
+    /// </summary>
+    public static int AppendCoreTapped(
+        OnnxGraphBuilder builder,
+        DinoV2Config config,
+        IReadOnlyDictionary<string, Tensor> state,
+        string inputName,
+        int imageHeight,
+        int imageWidth,
+        IReadOnlyList<int> tapBlocks,
+        out IReadOnlyList<string> tapMaps)
+    {
+        ArgumentNullException.ThrowIfNull(tapBlocks);
+
+        return AppendCoreInternal(
+            builder, config, state, inputName, imageHeight, imageWidth, outputName: null, tapBlocks, out tapMaps);
+    }
+
+    private static int AppendCoreInternal(
+        OnnxGraphBuilder builder,
+        DinoV2Config config,
+        IReadOnlyDictionary<string, Tensor> state,
+        string inputName,
+        int imageHeight,
+        int imageWidth,
+        string? outputName,
+        IReadOnlyList<int>? taps,
+        out IReadOnlyList<string> tapMaps)
+    {
+        tapMaps = Array.Empty<string>();
         ArgumentNullException.ThrowIfNull(builder);
         ArgumentNullException.ThrowIfNull(config);
         ArgumentNullException.ThrowIfNull(state);
         ArgumentException.ThrowIfNullOrWhiteSpace(inputName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(outputName);
+
+        if (outputName is not null)
+            ArgumentException.ThrowIfNullOrWhiteSpace(outputName);
 
         if (imageHeight % config.PatchSize != 0 || imageWidth % config.PatchSize != 0)
         {
@@ -98,20 +138,23 @@ public static class DinoV2OnnxExporter
             new[] { withCls },
             OnnxAttribute.Int("axis", 1));
 
-        float[] positions = TorchInterop.ToArray(context.State("pos_embed"));
-        var trimmed = new float[tokens * embedding];
-        Array.Copy(positions, trimmed, trimmed.Length);
-
-        string positioned = context.Next("tokens.positioned");
-        builder.Node(
-            "Add",
-            new[] { withCls, context.ConstantFloat("pos_embed", new long[] { 1, tokens, embedding }, trimmed) },
-            new[] { positioned });
+        string positioned = context.AppendAdd(withCls, AppendPosition(context, config, tokens, side), "tokens.positioned");
 
         string current = positioned;
+        var maps = new List<string>();
 
         for (int index = 0; index < config.Depth; index++)
+        {
             current = AppendBlock(context, index, current, config.Heads, embedding);
+
+            if (taps is not null && taps.Contains(index))
+                maps.Add(AppendPatchMap(context, current, side, embedding, $"tap{index}"));
+        }
+
+        tapMaps = maps;
+
+        if (outputName is null)
+            return tokens;
 
         string normalized = context.AppendLayerNorm("norm", current, "tokens.final");
 
@@ -119,6 +162,58 @@ public static class DinoV2OnnxExporter
             builder.Node("Identity", new[] { normalized }, new[] { outputName });
 
         return tokens;
+    }
+
+    /// <summary>
+    /// 位置编码：token 数与训练尺寸一致时直接截取；不一致时与 <c>DinoV2Backbone.PositionFor</c>
+    /// 一样，对 patch 位置做双三次插值（cls 位置原样保留）。直接截前缀会让不同分辨率下的
+    /// 位置信息整片错位，导出的 ONNX 与训练时的前向就对不上了。
+    /// </summary>
+    private static string AppendPosition(Context context, DinoV2Config config, int tokens, int side)
+    {
+        int embedding = config.EmbeddingSize;
+
+        if (tokens == config.TokenCount)
+            return context.AppendTensor("pos_embed", new long[] { 1, tokens, embedding });
+
+        int sourceSide = config.PatchCountPerSide;
+
+        // 导出尺寸是固定的，插值就在构图时用 torch 算好写成常量：与 PositionFor 是同一套操作，
+        // 不依赖推理后端对 Resize(cubic) 的实现细节。
+        using Tensor weight = torch.from_array(TorchInterop.ToArray(context.State("pos_embed")))
+            .reshape(1, config.TokenCount, embedding);
+
+        using Tensor patchEmbed = weight
+            .narrow(1, 1, sourceSide * sourceSide)
+            .view(1, sourceSide, sourceSide, embedding)
+            .permute(0, 3, 1, 2);
+
+        using Tensor resized = torch.nn.functional.interpolate(
+            patchEmbed,
+            new long[] { side, side },
+            mode: InterpolationMode.Bicubic,
+            align_corners: false);
+
+        using Tensor positioned = torch.cat(
+            new[]
+            {
+                weight.narrow(1, 0, 1),
+                resized.permute(0, 2, 3, 1).contiguous().view(1, side * side, embedding),
+            },
+            1);
+
+        return context.ConstantFloat(
+            "pos_embed", new long[] { 1, tokens, embedding }, TorchInterop.ToArray(positioned));
+    }
+
+    /// <summary>单个 tap：最终 norm → 去 cls → <c>[1,D,side,side]</c>（与 <c>ForwardTapped</c> 一致）。</summary>
+    private static string AppendPatchMap(Context context, string tokens, int side, int embedding, string hint)
+    {
+        string normalized = context.AppendLayerNorm("norm", tokens, hint + ".norm");
+        string patches = context.AppendSliceAxis(normalized, hint + ".patches", axis: 1, start: 1, end: side * side + 1L);
+        string channelsFirst = context.AppendTranspose(patches, hint + ".transposed", 0, 2, 1);
+
+        return context.AppendReshape(channelsFirst, hint + ".map", new long[] { 1, embedding, side, side });
     }
 
     /// <summary>构图并写出文件。</summary>
@@ -214,6 +309,42 @@ public static class DinoV2OnnxExporter
         {
             string output = Next(hint);
             Builder.Node("Reshape", new[] { input, ConstantInt64(hint + ".shape", shape) }, new[] { output });
+            return output;
+        }
+
+        public string AppendAdd(string left, string right, string hint)
+        {
+            string output = Next(hint);
+            Builder.Node("Add", new[] { left, right }, new[] { output });
+            return output;
+        }
+
+        public string AppendTranspose(string input, string hint, params int[] perm)
+        {
+            string output = Next(hint);
+            Builder.Node(
+                "Transpose",
+                new[] { input },
+                new[] { output },
+                OnnxAttribute.Ints("perm", perm.Select(value => (long)value).ToArray()));
+
+            return output;
+        }
+
+        public string AppendSliceAxis(string input, string hint, int axis, long start, long end)
+        {
+            string output = Next(hint);
+            Builder.Node(
+                "Slice",
+                new[]
+                {
+                    input,
+                    ConstantInt64(hint + ".starts", start),
+                    ConstantInt64(hint + ".ends", end),
+                    ConstantInt64(hint + ".axes", axis),
+                },
+                new[] { output });
+
             return output;
         }
 

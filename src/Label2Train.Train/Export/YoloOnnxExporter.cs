@@ -621,7 +621,10 @@ public static class YoloOnnxExporter
         string biasName = context.ConstantFloat(biasKey, bias.shape, TorchInterop.ToArray(bias));
 
         long stride = conv.stride.Length > 0 ? conv.stride[0] : 1;
-        long padding = conv.padding.Length > 0 ? conv.padding[0] : 0;
+
+        // padding 在 TorchSharp 里是可空的：没设置时按 0 处理（旧代码直接 .Length，编译器警告 CS8602）
+        long[]? paddingArray = conv.padding;
+        long padding = paddingArray is { Length: > 0 } ? paddingArray[0] : 0;
         int groups = (int)conv.groups;
 
         string output = context.Next(prefix + ".conv");

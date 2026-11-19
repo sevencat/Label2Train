@@ -102,6 +102,7 @@ public sealed class RfDetrDetector : Module<Tensor, Tensor>, ILossExtrasProvider
         ClassCount = classCount;
         Queries = queries;
         LevelCount = levels;
+        DeformPoints = points;
         DecoderHeads = decoderHeads > 0 ? decoderHeads : heads;
         UsesRefPointHead = useRefPointHead;
         UsesTwoStage = useTwoStage;
@@ -240,6 +241,12 @@ public sealed class RfDetrDetector : Module<Tensor, Tensor>, ILossExtrasProvider
 
     /// <summary>解码器可变形注意力头数（官方 16）。</summary>
     public int DecoderHeads { get; }
+
+    /// <summary>可变形注意力每尺度采样点数（官方 2）。ONNX 导出按它算头维度，写错就会整片错位。</summary>
+    public int DeformPoints { get; }
+
+    /// <summary>C2f 投影器取哪几个 ViT block 的输出（官方 2/5/8/11）；非 C2f 路径为空。</summary>
+    public IReadOnlyList<int> C2fTaps => _taps;
 
     /// <summary>是否使用官方的 4 维参考点（cxcywh）+ <c>ref_point_head</c>。</summary>
     public bool UsesRefPointHead { get; }
@@ -457,6 +464,10 @@ public sealed class RfDetrDetector : Module<Tensor, Tensor>, ILossExtrasProvider
     /// </summary>
     private Tensor[] BuildLevels(Tensor projected, int imageHeight, int imageWidth)
     {
+        // projector 是 C2f 路径下为 null 的字段，编译器看不到「调用方保证了它不是 null」（CS8602）
+        ModuleList<RfDetrProjectionLevel> branches = projector
+            ?? throw new InvalidOperationException("没有建投影器：BuildLevels 只在非 C2f 路径下调用。");
+
         var levels = new Tensor[LevelCount];
 
         for (int level = 0; level < LevelCount; level++)
@@ -471,7 +482,8 @@ public sealed class RfDetrDetector : Module<Tensor, Tensor>, ILossExtrasProvider
                 mode: InterpolationMode.Bilinear,
                 align_corners: false);
 
-            levels[level] = projector[level].forward(resized);
+            // 索引器本身也可空（null 表示该档没建），按构造时的约定每档都有分支
+            levels[level] = branches[level]!.forward(resized);
         }
 
         return levels;
