@@ -102,6 +102,26 @@ public class TrainViewTests
         Assert.True(host.ViewModel.Train.IsDetectYolov11);
     }
 
+    /// <summary>没有打开数据集时「开始训练」必须是灰的：按钮的 IsEnabled 绑定也要真生效，而不只是 VM 属性为 false。</summary>
+    [AvaloniaFact]
+    public async Task Start_Button_Is_Disabled_Without_Dataset()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+        MainWindow window = host.CreateMainWindow();
+
+        TestUi.Show(window);
+        TestUi.SwitchToTraining(window);
+
+        TrainView view = TestUi.Train(window);
+        string start = Localizer.Instance.Get("Train.Start");
+
+        Button button = view.GetVisualDescendants()
+            .OfType<Button>()
+            .Single(item => item.Content as string == start);
+
+        Assert.False(button.IsEnabled);
+    }
+
     [AvaloniaFact]
     public async Task Chart_Renders_Before_During_And_After_Training()
     {

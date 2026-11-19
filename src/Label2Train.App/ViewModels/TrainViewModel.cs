@@ -39,6 +39,9 @@ public partial class TrainViewModel : ObservableObject
 
     private IDatasetStore? _store;
 
+    /// <summary>当前数据集里的图片张数：0 张时不让开始训练（空数据集只会训出 NaN）。</summary>
+    private int _imageCount;
+
     /// <summary>当前数据集来自哪个标注项目；0 表示外部目录（没有项目目录可放模型）。</summary>
     private long _projectId;
 
@@ -242,12 +245,14 @@ public partial class TrainViewModel : ObservableObject
     // ── 运行状态（按钮可用性与顶栏徽标都从这里取）──────────────────────────────
 
     /// <summary>
-    /// 没选项目 / 没选输出路径时「开始训练」置灰：训练既要知道数据在哪，
+    /// 没选数据集 / 没选输出路径时「开始训练」置灰：训练既要知道数据在哪，
     /// 也要知道权重往哪写，缺一个都会在跑起来之后才报错。
+    /// 数据集里一张图都没有时同样置灰——空数据集跑出来的是一堆 NaN，不如直接拦住。
     /// imgsz 跟当前家族不兼容（RF-DETR 不是 112 的倍数）时也置灰，因为训完也导不出 ONNX。
     /// </summary>
     public bool CanStart => !IsTraining
         && _store is not null
+        && _imageCount > 0
         && !string.IsNullOrWhiteSpace(OutputDirectory)
         && IsImageSizeAllowed;
 
@@ -353,7 +358,12 @@ public partial class TrainViewModel : ObservableObject
         LogText = string.Join(Environment.NewLine, logBuffer.Snapshot().Select(entry => entry.ToString()));
     }
 
-    /// <summary>第一次切到训练页时跑一次：列库里的项目，再恢复上次训练的那个项目。</summary>
+    /// <summary>
+    /// 第一次切到训练页时跑一次：列出库里的项目。
+    /// 这里<b>不</b>自动把上次的项目打开——数据集没被用户明确选中时「开始训练」必须是灰的，
+    /// 否则启动后就出现一个可点的按钮，看起来像「没选也能训练」。
+    /// 上次用的项目只在「选择项目」对话框里预选，点一下确定就打开了。
+    /// </summary>
     public async Task InitializeAsync(CancellationToken ct = default)
     {
         if (_initialized)
@@ -364,7 +374,12 @@ public partial class TrainViewModel : ObservableObject
         _initialized = true;
 
         await RefreshProjectsAsync(ct).ConfigureAwait(true);
-        await RestoreLastLibraryAsync(ct).ConfigureAwait(true);
+
+        if (_store is null
+            && Projects.FirstOrDefault(item => item.Id == _settings.LastTrainLibraryProjectId) is { } last)
+        {
+            Status = Loc.Format("Train.LastProjectHint", last.Name);
+        }
     }
 
     /// <summary>切换界面语言后重算不依赖数据的固定文案。</summary>
@@ -577,57 +592,6 @@ public partial class TrainViewModel : ObservableObject
         }
     }
 
-    /// <summary>启动时把上次训练的标注项目重新打开；库固定是标注端当前库，项目没了就静默跳过。</summary>
-    public async Task RestoreLastLibraryAsync(CancellationToken ct = default)
-    {
-        // 没记过项目就不自动打开，避免启动就替用户挑了数据集
-        if (_settings.LastTrainLibraryProjectId <= 0)
-        {
-            return;
-        }
-
-        string database = _database.Path;
-
-        if (!File.Exists(database))
-        {
-            return;
-        }
-
-        string? folder = Path.GetDirectoryName(database);
-
-        if (string.IsNullOrWhiteSpace(folder))
-        {
-            return;
-        }
-
-        IReadOnlyList<TinyLabelProjectSummary> projects;
-
-        try
-        {
-            projects = await _catalog.ListAsync(StorageLocation.FromPath(folder), ct).ConfigureAwait(true);
-        }
-        catch (Exception error)
-        {
-            // 启动恢复失败不打扰用户：状态留着，等他自己挑数据集
-            _logger.LogWarning(error, "恢复上次的标注项目失败");
-            return;
-        }
-
-        TinyLabelProjectSummary? project =
-            projects.FirstOrDefault(item => item.Id == _settings.LastTrainLibraryProjectId)
-            ?? projects.FirstOrDefault();
-
-        if (project is null)
-        {
-            return;
-        }
-
-        _logger.LogInformation("启动恢复标注项目 {Project}（库 {Database}）", project.Name, database);
-
-        await OpenLibraryProjectAsync(project.Id, $"{project.Name} · #{project.Id}", ct)
-            .ConfigureAwait(true);
-    }
-
     /// <summary>
     /// 打开成功后统一收尾：换掉旧数据集、算摘要与统计、记类别。
     /// <paramref name="projectId"/> 是数据集所属的标注项目（外部目录传 0），导出时据此决定模型落在哪。
@@ -661,8 +625,11 @@ public partial class TrainViewModel : ObservableObject
         }
 
         Classes = [.. opened.Store.Classes.Names];
+        _imageCount = images;
         DatasetStats = Localizer.Instance.Format("Train.DatasetStats", images, boxes);
-        Status = Localizer.Instance.Format("Train.DatasetOpened", DatasetStats);
+        Status = images > 0
+            ? Localizer.Instance.Format("Train.DatasetOpened", DatasetStats)
+            : Localizer.Instance.Get("Train.DatasetEmpty");
         OnPropertyChanged(nameof(HasDataset));
         OnPropertyChanged(nameof(CanStart));
     }

@@ -749,6 +749,31 @@ public static class YoloOnnxExporter
             // 输出前 4 通道必须是 ultralytics 的 cx、cy、w、h（letterbox 像素坐标）：
             // 所有 YOLO 推理端（ultralytics 自身、OnnxSharp 的 YoloDecoder、各种第三方后处理）
             // 都按这个约定解释 output0，输出 xyxy 会被当成 cxcywh 再解码一次，框会放大且错位。
+            //
+            // 中心不能直接用网格中心：ultralytics 的 dist2bbox 是
+            //   x1y1 = anchor - lt, x2y2 = anchor + rb, c = (x1y1 + x2y2) / 2 = anchor + (rb - lt) / 2
+            // 少了那半个偏移，每个框都会被吸到最近的网格中心（最多半个 stride），
+            // 原图上看就是「所有框整体错位」——stride 32 那层能差 ±16px，放大到 1080 图更明显。
+            string centerOffsetX = context.Next(levelPrefix + ".cx.offset");
+            context.Builder.Node("Sub", new[] { sides[2], sides[0] }, new[] { centerOffsetX });
+
+            string centerOffsetY = context.Next(levelPrefix + ".cy.offset");
+            context.Builder.Node("Sub", new[] { sides[3], sides[1] }, new[] { centerOffsetY });
+
+            string half = context.ConstantFloat(levelPrefix + ".half", new long[] { 1 }, new[] { 0.5f });
+
+            string scaledX = context.Next(levelPrefix + ".cx.half");
+            context.Builder.Node("Mul", new[] { centerOffsetX, half }, new[] { scaledX });
+
+            string scaledY = context.Next(levelPrefix + ".cy.half");
+            context.Builder.Node("Mul", new[] { centerOffsetY, half }, new[] { scaledY });
+
+            string centerX = context.Next(levelPrefix + ".cx");
+            context.Builder.Node("Add", new[] { anchorXName, scaledX }, new[] { centerX });
+
+            string centerY = context.Next(levelPrefix + ".cy");
+            context.Builder.Node("Add", new[] { anchorYName, scaledY }, new[] { centerY });
+
             string width = context.Next(levelPrefix + ".w");
             context.Builder.Node("Add", new[] { sides[0], sides[2] }, new[] { width });
 
@@ -758,7 +783,7 @@ public static class YoloOnnxExporter
             string boxes = context.Next(levelPrefix + ".boxes");
             context.Builder.Node(
                 "Concat",
-                new[] { anchorXName, anchorYName, width, height },
+                new[] { centerX, centerY, width, height },
                 new[] { boxes },
                 OnnxAttribute.Int("axis", 1));
 

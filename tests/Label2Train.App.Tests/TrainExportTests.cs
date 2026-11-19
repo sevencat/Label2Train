@@ -1,7 +1,9 @@
 using System.Globalization;
 using Avalonia.Headless.XUnit;
+using Microsoft.Extensions.DependencyInjection;
 using Label2Train.App.ViewModels;
 using Label2Train.Core.Dataset.TinyLabel;
+using Label2Train.Core.Infrastructure;
 using Label2Train.Core.Storage;
 using Label2Train.Train.Export;
 using Label2Train.Train.Models.Yolo;
@@ -186,6 +188,31 @@ public class TrainExportTests
         TrainViewModel train = host.ViewModel.Train;
 
         Assert.Equal(Path.Combine(train.OutputDirectory, "export"), train.ExportDirectory);
+    }
+
+    /// <summary>
+    /// 启动时不自动打开上次的项目：数据集得由用户点一次「选择项目」确认，
+    /// 否则一进训练页「开始训练」就是亮的，看起来像「没选中也能训练」。
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Initialize_Does_Not_Auto_Open_Last_Project()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+
+        await host.ViewModel.GenerateSyntheticProjectAsync(
+            new SyntheticProjectDraft("自动恢复用模拟数据", 3, 64, 48, 1, 2, 0.0));
+
+        TrainViewModel train = host.ViewModel.Train;
+        TinyLabelProjectSummary project = Assert.Single(await train.ListLibraryProjectsAsync());
+
+        // 模拟「上次训练用过它」：记下 id，再走一次首次进入训练页的初始化
+        host.Services.GetRequiredService<AppSettings>().LastTrainLibraryProjectId = project.Id;
+
+        await train.InitializeAsync();
+
+        Assert.False(train.HasDataset);
+        Assert.False(train.CanStart);
+        Assert.Contains(project.Name, train.Status, StringComparison.Ordinal);
     }
 
     /// <summary>造一个「已经训练过」的输出目录：有元数据齐全的 best.safetensors 才有东西可导。</summary>
