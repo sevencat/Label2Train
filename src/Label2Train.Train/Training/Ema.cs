@@ -20,8 +20,14 @@ public sealed class Ema
 
         Decay = decay;
 
-        foreach ((string name, Tensor tensor) in model.state_dict())
-            _shadow[name] = torch.zeros_like(tensor);
+        // 影子参数必须以当前权重为起点（与 ultralytics 的 deepcopy 一致）。
+        // 若从 0 开始，decay=0.999 时训练 60 步只累积到 6% 的权重，
+        // 几百步内 EMA 检查点都是一份接近全 0 的无效权重。
+        using (torch.no_grad())
+        {
+            foreach ((string name, Tensor tensor) in model.state_dict())
+                _shadow[name] = tensor.detach().clone();
+        }
     }
 
     /// <summary>衰减系数（越接近 1 越平滑）。</summary>

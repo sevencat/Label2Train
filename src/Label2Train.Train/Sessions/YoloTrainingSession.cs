@@ -16,16 +16,16 @@ public sealed record YoloTrainingOptions
     public string Descriptor => string.IsNullOrWhiteSpace(CocoJson) ? DataYaml : CocoJson;
 
     /// <summary>训练轮数。</summary>
-    public int Epochs { get; init; } = 10;
+    public int Epochs { get; init; } = 100;
 
     /// <summary>批大小。</summary>
     public int BatchSize { get; init; } = 8;
 
     /// <summary>输入分辨率（必须是模型 stride 的整数倍）。</summary>
-    public int ImageSize { get; init; } = 64;
+    public int ImageSize { get; init; } = 640;
 
-    /// <summary>初始学习率。</summary>
-    public float LearningRate { get; init; } = 0.01f;
+    /// <summary>初始学习率（AdamW 常用 1e-3 ~ 2e-3，不是 SGD 的 1e-2）。</summary>
+    public float LearningRate { get; init; } = 0.002f;
 
     /// <summary>模型规模（n / s / m / l / x）。</summary>
     public string Scale { get; init; } = "n";

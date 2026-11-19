@@ -37,6 +37,9 @@ public sealed partial class YoloTrainingSession
         YoloModelFamily family = YoloScales.ParseFamily(options.Family);
         YoloDetectionModel model = YoloArchitectures.Create(device, family, scale, classCount);
 
+        // 分类 bias 先验按真实输入尺寸设一次（创建时按 640 设过）。
+        model.Head.ApplyClassBiasPrior(options.ImageSize);
+
         log?.Invoke($"data  : {options.Descriptor} · {trainSet.Samples.Count} 张 · {classCount} 类");
         log?.Invoke($"val   : {(validationSet is null ? "(无验证集)" : $"{validationSet.Samples.Count} 张")}");
         log?.Invoke($"model : {model.Architecture} ({YoloArchitectures.CountParameters(model)} params)");
@@ -44,12 +47,14 @@ public sealed partial class YoloTrainingSession
         log?.Invoke($"output: {output}");
 
         var optimizer = torch.optim.AdamW(model.parameters(), lr: options.LearningRate, weight_decay: 0.0005f);
-        var ema = new Ema(model, decay: 0.999f);
         var loss = new YoloDetectionLoss(options.ImageSize, options.ImageSize, classCount) { TrackComponents = true };
 
         int batchesPerEpoch = Math.Max(1, (trainSet.Samples.Count + options.BatchSize - 1) / options.BatchSize);
         int totalSteps = (options.Epochs * batchesPerEpoch) + 1;
         int warmupSteps = Math.Min(Math.Max(1, 3 * batchesPerEpoch), Math.Max(0, totalSteps - 1));
+
+        // 短训练用 0.999 的 EMA 相当于停在初始权重上，按总步数取衰减。
+        var ema = new Ema(model, decay: Math.Clamp(1f - 3f / Math.Max(1, totalSteps), 0.9f, 0.999f));
         var schedule = new CosineSchedule(options.LearningRate, totalSteps, warmupSteps, options.LearningRate * 0.01f);
 
         var trainer = new Trainer(
@@ -64,6 +69,11 @@ public sealed partial class YoloTrainingSession
         {
             Width = options.ImageSize,
             Height = options.ImageSize,
+            // 与 YoloDatasetTrainingRunner 的训练增强保持一致（小数据集靠它补多样性）。
+            HorizontalFlipProbability = 0.5f,
+            HueGain = 0.015f,
+            SaturationGain = 0.7f,
+            ValueGain = 0.4f,
         });
         using var validationLoader = new YoloSampleLoader(new YoloPreprocessOptions
         {
@@ -76,7 +86,7 @@ public sealed partial class YoloTrainingSession
         float lastMap95 = 0f;
 
         IReadOnlyList<EpochMetrics> history = trainer.Fit(
-            _ => BuildEpochBatches(),
+            epoch => BuildEpochBatches(epoch),
             schedule,
             metrics =>
             {
@@ -108,6 +118,11 @@ public sealed partial class YoloTrainingSession
             control);
 
         EpochMetrics last = history[^1];
+
+        // 所有轮次 mAP 都为 0 时也要留一份可导出的 best。
+        if (bestMap50 <= 0f)
+            Save("best.safetensors", last, bestMap50, lastMap95);
+
         Save("model.safetensors", last, bestMap50, lastMap95);
 
         Checkpoint.Save(
@@ -121,16 +136,19 @@ public sealed partial class YoloTrainingSession
 
         return history;
 
-        IEnumerable<Batch> BuildEpochBatches()
+        IEnumerable<Batch> BuildEpochBatches(int epoch)
         {
             IReadOnlyList<YoloSample> samples = trainSet.Samples;
+
+            // 每轮换一次顺序 + 重新采样增强，别让同一批图总落在同一条梯度方向上。
+            int[] order = ShuffleSamples(samples.Count, new Rng((ulong)(0x51ED270B + epoch * 7919)));
 
             Batch? previous = null;
             try
             {
-                for (int start = 0; start < samples.Count; start += options.BatchSize)
+                for (int start = 0; start < order.Length; start += options.BatchSize)
                 {
-                    int count = Math.Min(options.BatchSize, samples.Count - start);
+                    int count = Math.Min(options.BatchSize, order.Length - start);
                     var images = new YoloImageSample[count];
 
                     // 一批图串行解码 + letterbox + 增强要几百毫秒，GPU 一步才 ~0.1 s，
@@ -139,7 +157,9 @@ public sealed partial class YoloTrainingSession
                         0,
                         count,
                         new ParallelOptions { MaxDegreeOfParallelism = Math.Min(count, 8) },
-                        offset => images[offset] = trainLoader.Load(samples[start + offset]));
+                        offset => images[offset] = trainLoader.Load(
+                            samples[order[start + offset]],
+                            new Rng((ulong)(epoch * 7919L + start + offset))));
 
                     YoloBatchResult packed = YoloBatchBuilder.Build(images);
 
@@ -174,6 +194,21 @@ public sealed partial class YoloTrainingSession
             // 优化器状态用 TorchSharp 自己的 bin 格式（模型权重仍是可互转的 safetensors）。
             optimizer.save_state_dict(Path.Combine(output, "optimizer.bin"));
         }
+    }
+
+    private static int[] ShuffleSamples(int count, Rng rng)
+    {
+        var order = new int[count];
+        for (int i = 0; i < count; i++)
+            order[i] = i;
+
+        for (int i = order.Length - 1; i > 0; i--)
+        {
+            int j = rng.NextInt(i + 1);
+            (order[i], order[j]) = (order[j], order[i]);
+        }
+
+        return order;
     }
 }
 

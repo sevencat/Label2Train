@@ -24,6 +24,9 @@ public sealed class DetectHeadModule : Module<Tensor[], Tensor>
     /// <summary>ultralytics 默认的 DFL 区间数。</summary>
     public const int DefaultRegressionMax = 16;
 
+    /// <summary>P3 / P4 / P5 的下采样倍数，分类 bias 先验按它换算。</summary>
+    private static readonly int[] DefaultStrides = { 8, 16, 32 };
+
     private readonly ModuleList<Module<Tensor, Tensor>> cv2;
     private readonly ModuleList<Module<Tensor, Tensor>> cv3;
     private readonly DflModule dfl;
@@ -40,12 +43,17 @@ public sealed class DetectHeadModule : Module<Tensor[], Tensor>
     /// 分类分支是否用「深度可分离 3×3 + 1×1」的两段式（YOLOv11 的写法，键名多一层：
     /// <c>cv3.0.0.0.conv.weight</c>）；YOLOv8 用普通 3×3 卷积。
     /// </param>
+    /// <param name="imageSize">
+    /// 训练 / 推理的输入边长，只用于分类 bias 的初始先验（与 ultralytics 的
+    /// <c>log(5 / nc / (imgsz / stride)²)</c> 一致）。
+    /// </param>
     public DetectHeadModule(
         IReadOnlyList<int> inputChannels,
         int classCount,
         int regressionMax = DefaultRegressionMax,
         Device? device = null,
-        bool depthwiseClassBranch = false)
+        bool depthwiseClassBranch = false,
+        int imageSize = 640)
         : base("Detect")
     {
         ArgumentNullException.ThrowIfNull(inputChannels);
@@ -130,9 +138,41 @@ public sealed class DetectHeadModule : Module<Tensor[], Tensor>
 
         dfl = new DflModule(regressionMax, device);
 
+        ApplyClassBiasPrior(imageSize);
+
         register_module("cv2", cv2);
         register_module("cv3", cv3);
         register_module("dfl", dfl);
+    }
+
+    /// <summary>
+    /// 按 ultralytics 的做法把分类分支末层 bias 设成很小的先验：
+    /// <c>bias = log(5 / nc / (imgsz / stride)²)</c>，即初始正样本概率约 <c>5/nc</c> 个格子。
+    /// <para>
+    /// 不做这一步时初始 sigmoid 全是 0.5，8400 个锚点的 BCE 汇总后 cls loss 会到上千，
+    /// 与 box / dfl 相差几个数量级；在只有几百步的小数据集训练里，前几十步都在纠正这个偏置。
+    /// </para>
+    /// <para>
+    /// 创建模型时按 640 先设一次；实际输入尺寸不同（例如 320）时，训练前再按真实 <paramref name="imageSize"/> 覆盖一次。
+    /// </para>
+    /// </summary>
+    public void ApplyClassBiasPrior(int imageSize)
+    {
+        if (imageSize <= 0)
+            return;
+
+        using (torch.no_grad())
+        {
+            for (int level = 0; level < _levels && level < DefaultStrides.Length; level++)
+            {
+                if (_classBranches[level].Items[^1] is not TorchSharp.Modules.Conv2d conv || conv.bias is null)
+                    continue;
+
+                float cells = imageSize / (float)DefaultStrides[level];
+                float priorProbability = 5f / ClassCount / (cells * cells);
+                conv.bias.fill_(MathF.Log(priorProbability));
+            }
+        }
     }
 
     /// <summary>类别数（nc）。</summary>

@@ -22,7 +22,7 @@ public partial class TrainingParamsDialog : Window
     }
 
     private void OnOk(object? sender, RoutedEventArgs e) => Close(new TrainParams(
-        (int)(EpochsBox.Value ?? 10m),
+        (int)(EpochsBox.Value ?? 100m),
         (int)(BatchBox.Value ?? 4m),
         (int)(ImageSizeBox.Value ?? 640m)));
 

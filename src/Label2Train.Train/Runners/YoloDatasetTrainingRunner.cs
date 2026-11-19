@@ -82,6 +82,9 @@ public sealed class YoloDatasetTrainingRunner(
         YoloModelFamily family = YoloScales.ParseFamily(options.Family);
         YoloDetectionModel model = YoloArchitectures.Create(device, family, scale, classCount);
 
+        // 创建时按 640 设的分类 bias 先验，这里按真实输入尺寸再覆盖一次。
+        model.Head.ApplyClassBiasPrior(options.ImageSize);
+
         Log(options, $"data  : {store.Id} · {trainSamples.Count} 张 · {classCount} 类 · {totalBoxes} 个框");
         Log(options, $"val   : {(valSplit is null ? "(无验证集)" : $"{validationSamples.Count} 张")}");
         Log(options, $"model : {model.Architecture} ({YoloArchitectures.CountParameters(model)} params)");
@@ -89,13 +92,19 @@ public sealed class YoloDatasetTrainingRunner(
         Log(options, $"output: {output}");
 
         var optimizer = torch.optim.AdamW(model.parameters(), lr: options.LearningRate, weight_decay: 0.0005f);
-        var ema = new Ema(model, decay: 0.999f);
         var loss = new YoloDetectionLoss(options.ImageSize, options.ImageSize, classCount) { TrackComponents = true };
 
         int batchesPerEpoch = Math.Max(1, (trainSamples.Count + options.BatchSize - 1) / options.BatchSize);
         int totalSteps = (options.Epochs * batchesPerEpoch) + 1;
         int warmupSteps = Math.Min(Math.Max(1, 3 * batchesPerEpoch), Math.Max(0, totalSteps - 1));
+
+        // 小数据集只有几百步：固定的 0.999 会让影子权重停在初始值附近，按总步数换算衰减。
+        var ema = new Ema(model, decay: EmaDecayFor(totalSteps));
         var schedule = new CosineSchedule(options.LearningRate, totalSteps, warmupSteps, options.LearningRate * 0.01f);
+
+        Log(options,
+            $"hyper : lr {options.LearningRate:G3} · steps {totalSteps} · warmup {warmupSteps} · "
+            + $"ema {ema.Decay:F4} · hflip 0.5 / hsv 0.015,0.7,0.4");
 
         var trainer = new Trainer(
             model,
@@ -142,33 +151,51 @@ public sealed class YoloDatasetTrainingRunner(
                 schedule,
                 metrics =>
                 {
-                    var evalWatch = System.Diagnostics.Stopwatch.StartNew();
-                    (float map50, float map95) = EvaluateMap(
-                        model, validationSamples, validationLoader, options, classCount, device, ct);
-                    evalWatch.Stop();
+                    int completed = metrics.Epoch + 1;
+                    bool evaluate = options.EvalEvery <= 0
+                        || completed % options.EvalEvery == 0
+                        || completed >= options.Epochs;
 
-                    lastMap50 = map50;
-                    lastMap95 = map95;
+                    float map50 = lastMap50;
+                    float map95 = lastMap95;
+                    double evalSeconds = 0;
+
+                    if (evaluate)
+                    {
+                        var evalWatch = System.Diagnostics.Stopwatch.StartNew();
+                        (map50, map95) = EvaluateMap(
+                            model, validationSamples, validationLoader, options, classCount, device, ct);
+                        evalWatch.Stop();
+                        evalSeconds = evalWatch.Elapsed.TotalSeconds;
+
+                        lastMap50 = map50;
+                        lastMap95 = map95;
+
+                        // 第一次评估就留一份 best：mAP 全为 0（随机初始化）时也要有可导出的权重。
+                        if (!bestSaved || map50 > bestMap50)
+                        {
+                            bestSaved = true;
+                            bestMap50 = map50;
+                            Save("best.safetensors", metrics, map50, map95);
+                        }
+                    }
 
                     // 把一轮拆成「等数据 / 算梯度 / 评估」三段：GPU 慢还是数据管道慢，看这一行就够了。
                     Log(options,
-                        $"epoch {metrics.Epoch + 1}/{options.Epochs}  loss {metrics.Loss:F4}  "
+                        $"epoch {completed}/{options.Epochs}  loss {metrics.Loss:F4}  "
                         + $"mAP50 {map50:F3}  mAP50-95 {map95:F3}  "
                         + $"time data {trainer.LastDataSeconds:F1}s + step {trainer.LastComputeSeconds:F1}s "
-                        + $"+ eval {evalWatch.Elapsed.TotalSeconds:F1}s");
+                        + (evaluate ? $"+ eval {evalSeconds:F1}s" : "+ eval skipped"));
 
                     options.Progress?.Report(new TrainingProgress(
                         metrics.Epoch, options.Epochs, metrics.Step, metrics.Loss, metrics.LearningRate, map50, map95));
 
-                    // 第一轮无条件存 best：mAP 全为 0（随机初始化）时也要留一份可用权重。
-                    if (!bestSaved || map50 > bestMap50)
+                    // 权重 + AdamW 状态与模型同量级，每轮都落盘会在几百轮时写掉几十 GB。
+                    if (completed >= options.Epochs
+                        || (options.SaveEvery > 0 && completed % options.SaveEvery == 0))
                     {
-                        bestSaved = true;
-                        bestMap50 = map50;
-                        Save("best.safetensors", metrics, map50, map95);
+                        Save("model.safetensors", metrics, map50, map95);
                     }
-
-                    Save("model.safetensors", metrics, map50, map95);
                 },
                 control);
         }
@@ -185,6 +212,13 @@ public sealed class YoloDatasetTrainingRunner(
         EpochMetrics last = history.Count > 0
             ? history[^1]
             : new EpochMetrics(0, 0, float.NaN, options.LearningRate);
+
+        // 评估被节流且中途停止时可能一次评估都没做：兜底把最终权重当成 best，导出才有文件可用。
+        if (!bestSaved)
+        {
+            bestSaved = true;
+            Save("best.safetensors", last, lastMap50, lastMap95);
+        }
 
         Save("model.safetensors", last, lastMap50, lastMap95);
 
@@ -470,6 +504,16 @@ public sealed class YoloDatasetTrainingRunner(
             Path.Combine(output, "train.json"),
             JsonSerializer.Serialize(report, new JsonSerializerOptions { WriteIndented = true }));
     }
+
+    /// <summary>
+    /// 按总步数选 EMA 衰减：<c>1 - 3/steps</c>，夹在 <c>[0.9, 0.999]</c>。
+    /// <para>
+    /// 30 张图 × 100 轮只有几百步，固定 0.999 的等效记忆长度远超训练步数，
+    /// EMA 权重几乎等于初始权重；按步数换算后短训练也能得到有意义的平均权重。
+    /// </para>
+    /// </summary>
+    private static float EmaDecayFor(int totalSteps)
+        => Math.Clamp(1f - 3f / Math.Max(1, totalSteps), 0.9f, 0.999f);
 
     private static int[] Shuffle(int[] order, Rng rng)
     {

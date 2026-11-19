@@ -21,10 +21,10 @@ namespace Label2Train.Core.Simulation;
 public sealed record TrainingRunOptions(
     StorageLocation Output,
     IReadOnlyList<string>? Splits = null,
-    int Epochs = 10,
+    int Epochs = 100,
     int BatchSize = 8,
     int ImageSize = 640,
-    float LearningRate = 0.01f,
+    float LearningRate = 0.002f,
     string Scale = "n",
     string Family = "v8",
     string Device = "")
@@ -40,6 +40,12 @@ public sealed record TrainingRunOptions(
     /// 为空时运行器自己建一个不可暂停的控制器。
     /// </summary>
     public ITrainingControl? Control { get; init; }
+
+    /// <summary>每几轮落一次 <c>model.safetensors</c> + <c>optimizer.bin</c>（0 表示只在结束时落）。</summary>
+    public int SaveEvery { get; init; } = 10;
+
+    /// <summary>每几轮在验证集上算一次 mAP（0 表示每轮都算；最后一轮总会算）。</summary>
+    public int EvalEvery { get; init; } = 5;
 }
 
 /// <summary>

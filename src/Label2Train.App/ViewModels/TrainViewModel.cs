@@ -64,7 +64,7 @@ public partial class TrainViewModel : ObservableObject
     private string _datasetStats = string.Empty;
 
     [ObservableProperty]
-    private decimal _epochs = 10;
+    private decimal _epochs = 100;
 
     [ObservableProperty]
     private decimal _batchSize = 4;
