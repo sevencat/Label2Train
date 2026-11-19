@@ -64,13 +64,13 @@ public partial class TrainViewModel : ObservableObject
     private string _datasetStats = string.Empty;
 
     [ObservableProperty]
-    private decimal _epochs = 100;
+    private decimal _epochs = TrainingPresets.Yolo.Epochs;
 
     [ObservableProperty]
-    private decimal _batchSize = 4;
+    private decimal _batchSize = TrainingPresets.Yolo.BatchSize;
 
     [ObservableProperty]
-    private decimal _imageSize = 640;
+    private decimal _imageSize = TrainingPresets.Yolo.ImageSize;
 
     /// <summary>训练成哪个家族：YOLOv8 / YOLOv11 / RF-DETR。</summary>
     public IReadOnlyList<ModelOption> ModelFamilies { get; } =
@@ -84,7 +84,65 @@ public partial class TrainViewModel : ObservableObject
     [ObservableProperty]
     private ModelOption? _selectedModel;
 
-    /// <summary>最近一次导出的 ONNX 路径：检测按钮直接拿它推理，不再让用户挑模型文件。</summary>
+    /// <summary>
+    /// 检测用的模型（界面上三个单选）：Id 只用于判断家族，<see cref="DetectModelOption.FilePrefix"/>
+    /// 就是导出文件名前缀，选中哪个就去 models 目录取 <c>{前缀}.onnx</c>。
+    /// </summary>
+    public IReadOnlyList<DetectModelOption> DetectModels { get; } =
+    [
+        new DetectModelOption("yolov8", "YOLOv8", "yolov8"),
+        new DetectModelOption("yolov11", "YOLOv11", "yolov11"),
+        new DetectModelOption("rfdetr", "RF-DETR", "rfdetr"),
+    ];
+
+    /// <summary>检测用哪个模型推理。</summary>
+    [ObservableProperty]
+    private DetectModelOption _selectedDetectModel = null!;
+
+    public bool IsDetectYolov8
+    {
+        get => SelectedDetectModel.Id == "yolov8";
+        set
+        {
+            if (value)
+            {
+                SelectedDetectModel = DetectModels[0];
+            }
+        }
+    }
+
+    public bool IsDetectYolov11
+    {
+        get => SelectedDetectModel.Id == "yolov11";
+        set
+        {
+            if (value)
+            {
+                SelectedDetectModel = DetectModels[1];
+            }
+        }
+    }
+
+    public bool IsDetectRfDetr
+    {
+        get => SelectedDetectModel.Id == "rfdetr";
+        set
+        {
+            if (value)
+            {
+                SelectedDetectModel = DetectModels[2];
+            }
+        }
+    }
+
+    partial void OnSelectedDetectModelChanged(DetectModelOption value)
+    {
+        OnPropertyChanged(nameof(IsDetectYolov8));
+        OnPropertyChanged(nameof(IsDetectYolov11));
+        OnPropertyChanged(nameof(IsDetectRfDetr));
+    }
+
+    /// <summary>最近一次导出的 ONNX 路径（只用于展示与日志；检测走的是单选对应的前缀文件）。</summary>
     public string LastOnnxPath { get; private set; } = string.Empty;
 
     /// <summary>epochs / batch / imgsz 在界面上只读展示，改值走「修改」对话框。</summary>
@@ -98,7 +156,38 @@ public partial class TrainViewModel : ObservableObject
 
     partial void OnBatchSizeChanged(decimal value) => OnPropertyChanged(nameof(BatchSizeText));
 
-    partial void OnImageSizeChanged(decimal value) => OnPropertyChanged(nameof(ImageSizeText));
+    partial void OnImageSizeChanged(decimal value)
+    {
+        OnPropertyChanged(nameof(ImageSizeText));
+        RaiseRunState();
+    }
+
+    partial void OnSelectedModelChanged(ModelOption? value)
+    {
+        RaiseRunState();
+        ReportImageSizeIfBlocked();
+    }
+
+    /// <summary>
+    /// 当前家族的 imgsz 能不能用：RF-DETR 的 ONNX 导出要求边长同时被 patch 14 与下采样 16
+    /// 整除，也就是 112 的倍数。这里就拦住，别等训练完才发现导不出来。
+    /// </summary>
+    public bool IsImageSizeAllowed =>
+        !TrainingPresets.IsDetrFamily(SelectedModel?.Id)
+        || TrainingPresets.IsValidDetrImageSize((int)ImageSize);
+
+    /// <summary>切到 DETR 家族而 imgsz 不合法时，状态行直接说清怎么改。</summary>
+    private void ReportImageSizeIfBlocked()
+    {
+        if (IsTraining || IsImageSizeAllowed)
+        {
+            return;
+        }
+
+        Report(Loc.Format(
+            "Train.DetrImageSizeBlocked",
+            TrainingPresets.NearestValidDetrImageSize((int)ImageSize)));
+    }
 
     [ObservableProperty]
     private string _outputDirectory = Path.Combine(AppDataPaths.DataDirectory, "runs");
@@ -152,7 +241,15 @@ public partial class TrainViewModel : ObservableObject
 
     // ── 运行状态（按钮可用性与顶栏徽标都从这里取）──────────────────────────────
 
-    public bool CanStart => !IsTraining;
+    /// <summary>
+    /// 没选项目 / 没选输出路径时「开始训练」置灰：训练既要知道数据在哪，
+    /// 也要知道权重往哪写，缺一个都会在跑起来之后才报错。
+    /// imgsz 跟当前家族不兼容（RF-DETR 不是 112 的倍数）时也置灰，因为训完也导不出 ONNX。
+    /// </summary>
+    public bool CanStart => !IsTraining
+        && _store is not null
+        && !string.IsNullOrWhiteSpace(OutputDirectory)
+        && IsImageSizeAllowed;
 
     public bool CanPause => IsTraining && !IsPaused;
 
@@ -170,8 +267,11 @@ public partial class TrainViewModel : ObservableObject
 
     partial void OnIsPausedChanged(bool value) => RaiseRunState();
 
+    partial void OnOutputDirectoryChanged(string value) => RaiseRunState();
+
     private void RaiseRunState()
     {
+        OnPropertyChanged(nameof(IsImageSizeAllowed));
         OnPropertyChanged(nameof(CanStart));
         OnPropertyChanged(nameof(CanPause));
         OnPropertyChanged(nameof(CanResume));
@@ -203,6 +303,7 @@ public partial class TrainViewModel : ObservableObject
         _database = database;
         _exporter = exporter;
         _selectedModel = ModelFamilies[0];
+        _selectedDetectModel = DetectModels[0];
 
         // 轴范围一律给实数：OxyPlot 2.x 在算刻度时会对 NaN 取符号，
         // 一旦某根轴的 Minimum/Maximum 是 NaN 就抛 ArithmeticException，整张图都画不出来
@@ -563,6 +664,7 @@ public partial class TrainViewModel : ObservableObject
         DatasetStats = Localizer.Instance.Format("Train.DatasetStats", images, boxes);
         Status = Localizer.Instance.Format("Train.DatasetOpened", DatasetStats);
         OnPropertyChanged(nameof(HasDataset));
+        OnPropertyChanged(nameof(CanStart));
     }
 
     // ── 训练 ──────────────────────────────────────────────────────────────────
@@ -588,8 +690,43 @@ public partial class TrainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// 导出当前训练产物到 <see cref="ExportDirectory"/>：<c>best.safetensors</c> + <c>model.json</c>，
-    /// <paramref name="withOnnx"/> 为真时再导出一份 <c>best.onnx</c>；导出的 ONNX 之后直接给「检测」用。
+    /// 当前检测单选对应的 ONNX 路径，严格按前缀取：选 YOLOv8 就是 <c>yolov8.onnx</c>，
+    /// 选 YOLOv11 就是 <c>yolov11.onnx</c>，选 RF-DETR 就是 <c>rfdetr.onnx</c>；找不到返回空串。
+    /// 这里不做跨前缀回退——拿别的家族的权重去推理只会得到乱框或者直接崩，
+    /// 比「提示缺模型」糟得多。
+    /// </summary>
+    public string ResolveDetectModelPath()
+    {
+        string directory = ExportDirectory;
+        string preferred = Path.Combine(directory, SelectedDetectModel.FilePrefix + ".onnx");
+
+        if (File.Exists(preferred))
+        {
+            return preferred;
+        }
+
+        // 旧版本导出统一叫 best.onnx，且只有 YOLO 一个家族；v11 的权重长什么样无从得知，
+        // 所以只给 YOLOv8 兼容这一份
+        if (SelectedDetectModel.Id == "yolov8")
+        {
+            string legacy = Path.Combine(directory, TrainingExportService.OnnxFileName);
+
+            return File.Exists(legacy) ? legacy : string.Empty;
+        }
+
+        return string.Empty;
+    }
+
+    /// <summary>选的模型还没导出时给用户看的话：缺哪个文件、怎么生成。</summary>
+    public string DescribeMissingDetectModel() => Loc.Format(
+        "Train.DetectModelMissing",
+        SelectedDetectModel.Name,
+        SelectedDetectModel.FilePrefix + ".onnx");
+
+    /// <summary>
+    /// 导出当前训练产物到 <see cref="ExportDirectory"/>：<c>{模型名}.safetensors</c> +
+    /// <c>{模型名}.json</c>，<paramref name="withOnnx"/> 为真时再导出一份 <c>{模型名}.onnx</c>；
+    /// 文件名前缀按架构自动取（yolov8 / yolov11 / rfdetr），导出的 ONNX 之后直接给「检测」用。
     /// 返回是否成功（训练结束后的自动导出据此决定状态行怎么写）。
     /// </summary>
     public async Task<bool> ExportAsync(bool withOnnx, CancellationToken ct = default)
@@ -608,7 +745,15 @@ public partial class TrainViewModel : ObservableObject
             {
                 LastOnnxPath = onnx;
 
-                // 检测与 AI 标注都从这个设置取模型：导出后直接指向新模型，重启也不用再挑文件
+                // 检测单选跟着刚导出的模型走：三个模型共存时，用户不用自己去对文件名
+                string prefix = Path.GetFileNameWithoutExtension(onnx);
+
+                if (DetectModels.FirstOrDefault(model => model.FilePrefix == prefix) is { } matched)
+                {
+                    SelectedDetectModel = matched;
+                }
+
+                // AI 标注从这个设置取模型：导出后直接指向新模型，重启也不用再挑文件
                 _settings.AutoLabelModelPath = onnx;
                 SaveSettings();
             }
@@ -890,6 +1035,9 @@ public partial class TrainViewModel : ObservableObject
 
 /// <summary>训练模型家族下拉的一行；Id 直接就是 <c>TrainingRunOptions.Family</c>。</summary>
 public sealed record ModelOption(string Id, string Name);
+
+/// <summary>「检测用哪个模型」的三个单选：<see cref="FilePrefix"/> 就是导出文件名前缀。</summary>
+public sealed record DetectModelOption(string Id, string Name, string FilePrefix);
 
 /// <summary>「标注项目」下拉的一行：项目 Id 就是打开数据集时的 datasetId。</summary>
 public sealed record ProjectOption(long Id, string Name, int ImageCount, int LabeledCount)

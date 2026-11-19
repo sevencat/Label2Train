@@ -505,7 +505,9 @@ public sealed partial class AnnotationViewModel : ObservableObject
         }
 
         _runner?.Dispose();
-        _runner = new YoloOnnxRunner(modelPath);
+
+        // 导出的既可能是 YOLO 也可能是 RF-DETR，按文件名分派（两处各判一次早晚分叉）
+        _runner = AutoLabelRunnerFactory.Create(modelPath);
         _runnerModel = modelPath;
         return _runner;
     }

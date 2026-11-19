@@ -18,6 +18,8 @@
   <ItemGroup>
     <!-- 测试要构造 ClassCatalog 等内部类型 -->
     <InternalsVisibleTo Include="Label2Train.Label.Tests" />
+    <!-- 测试要直接验证 BGRA→BGR 打包（ONNX 预处理的字节布局） -->
+    <InternalsVisibleTo Include="Label2Train.App.Tests" />
   </ItemGroup>
 
 </Project>

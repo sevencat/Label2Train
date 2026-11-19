@@ -12,6 +12,7 @@ using Label2Train.Core.Dataset.TinyLabel;
 using Label2Train.Core.Infrastructure;
 using Label2Train.Core.Localization;
 using Label2Train.Core.Storage;
+using Label2Train.Train.Training;
 
 namespace Label2Train.App.Views;
 
@@ -38,13 +39,25 @@ public partial class TrainView : UserControl
             return;
         }
 
-        var dialog = new TrainingParamsDialog(viewModel.Epochs, viewModel.BatchSize, viewModel.ImageSize);
+        var dialog = new TrainingParamsDialog(
+            viewModel.Epochs,
+            viewModel.BatchSize,
+            viewModel.ImageSize,
+            viewModel.SelectedModel?.Id ?? "v8");
 
         if (await dialog.ShowDialog<TrainParams?>(owner) is { } updated)
         {
+            bool resized = (int)viewModel.ImageSize != updated.ImageSize;
+
             viewModel.Epochs = updated.Epochs;
             viewModel.BatchSize = updated.BatchSize;
             viewModel.ImageSize = updated.ImageSize;
+
+            // imgsz 被纠正过就说一声，别让用户以为参数没保存
+            if (resized && TrainingPresets.IsDetrFamily(viewModel.SelectedModel?.Id))
+            {
+                viewModel.Report(Loc.Format("Train.ImageSizeAdjusted", updated.ImageSize));
+            }
         }
     }
 
@@ -220,7 +233,6 @@ public partial class TrainView : UserControl
     private async Task DetectAsync(TrainViewModel viewModel, Window owner)
     {
         AppSettings settings = BeanFactory.Require<AppSettings>();
-        SettingsStore settingsStore = BeanFactory.Require<SettingsStore>();
 
         string? imagePath = await PickFileAsync(
             "选择要检测的图片",
@@ -231,34 +243,19 @@ public partial class TrainView : UserControl
             return;
         }
 
-        // 优先用最近导出的 ONNX：那就是当前训练出来的模型
-        string modelPath = viewModel.LastOnnxPath;
+        // 单选定的哪个模型就用哪个：yolov8.onnx / yolov11.onnx / rfdetr.onnx。
+        // 找不到就明确报缺文件，绝不悄悄换成别的模型（换了框会整体错、甚至崩在输出名上）
+        string modelPath = viewModel.ResolveDetectModelPath();
 
-        if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
+        if (!File.Exists(modelPath))
         {
-            modelPath = settings.AutoLabelModelPath;
-        }
-
-        if (string.IsNullOrWhiteSpace(modelPath) || !File.Exists(modelPath))
-        {
-            string? picked = await PickFileAsync(
-                "选择 ONNX 模型",
-                [new FilePickerFileType("ONNX 模型") { Patterns = ["*.onnx"] }]);
-
-            if (picked is null)
-            {
-                viewModel.Report("没有可用模型，检测取消");
-                return;
-            }
-
-            modelPath = picked;
-            settings.AutoLabelModelPath = modelPath;
-            SaveSettings(settingsStore, settings);
+            viewModel.Report(viewModel.DescribeMissingDetectModel());
+            return;
         }
 
         viewModel.Status = "检测中…";
 
-        using var runner = new YoloOnnxRunner(modelPath);
+        using IAutoLabelRunner runner = AutoLabelRunnerFactory.Create(modelPath);
         using var bitmap = new Bitmap(imagePath);
 
         byte[] bgra = BitmapPixels.ToBgra(bitmap, out int width, out int height);

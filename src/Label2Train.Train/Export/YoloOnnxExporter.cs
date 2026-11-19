@@ -16,7 +16,7 @@ namespace Label2Train.Train.Export;
 /// <list type="bullet">
 /// <item>BatchNorm 折叠进卷积（<c>W' = W·γ/√(σ²+ε)</c>、<c>b' = β - μ·γ/√(σ²+ε)</c>），导出后没有 BN 节点；</item>
 /// <item>SiLU 展开为 <c>Sigmoid + Mul</c>；C2f 用 <c>Split</c> 切半、<c>Concat</c> 汇总；SPPF 用连续 <c>MaxPool</c>；</item>
-/// <item>检测头按尺度解码：<c>Softmax → DFL 加权和 → ltrb</c>，再用常量锚点算 <c>xyxy</c>，分类分支做 <c>Sigmoid</c>。</item>
+/// <item>检测头按尺度解码：<c>Softmax → DFL 加权和 → ltrb</c>，再用常量锚点算 <c>cx、cy、w、h</c>（ultralytics 的 output0 约定，不是 xyxy），分类分支做 <c>Sigmoid</c>。</item>
 /// </list>
 /// </para>
 /// <para>
@@ -746,22 +746,19 @@ public static class YoloOnnxExporter
             string anchorYName = context.ConstantFloat(
                 levelPrefix + ".anchor.y", new long[] { 1, 1, anchors }, anchorY);
 
-            string x1 = context.Next(levelPrefix + ".x1");
-            context.Builder.Node("Sub", new[] { anchorXName, sides[0] }, new[] { x1 });
+            // 输出前 4 通道必须是 ultralytics 的 cx、cy、w、h（letterbox 像素坐标）：
+            // 所有 YOLO 推理端（ultralytics 自身、OnnxSharp 的 YoloDecoder、各种第三方后处理）
+            // 都按这个约定解释 output0，输出 xyxy 会被当成 cxcywh 再解码一次，框会放大且错位。
+            string width = context.Next(levelPrefix + ".w");
+            context.Builder.Node("Add", new[] { sides[0], sides[2] }, new[] { width });
 
-            string y1 = context.Next(levelPrefix + ".y1");
-            context.Builder.Node("Sub", new[] { anchorYName, sides[1] }, new[] { y1 });
-
-            string x2 = context.Next(levelPrefix + ".x2");
-            context.Builder.Node("Add", new[] { anchorXName, sides[2] }, new[] { x2 });
-
-            string y2 = context.Next(levelPrefix + ".y2");
-            context.Builder.Node("Add", new[] { anchorYName, sides[3] }, new[] { y2 });
+            string height = context.Next(levelPrefix + ".h");
+            context.Builder.Node("Add", new[] { sides[1], sides[3] }, new[] { height });
 
             string boxes = context.Next(levelPrefix + ".boxes");
             context.Builder.Node(
                 "Concat",
-                new[] { x1, y1, x2, y2 },
+                new[] { anchorXName, anchorYName, width, height },
                 new[] { boxes },
                 OnnxAttribute.Int("axis", 1));
 

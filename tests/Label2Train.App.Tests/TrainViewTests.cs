@@ -4,6 +4,7 @@ using Avalonia.VisualTree;
 using Label2Train.App.ViewModels;
 using Label2Train.App.Views;
 using Label2Train.Core.Dataset.TinyLabel;
+using Label2Train.Core.Localization;
 using OxyPlot;
 using OxyPlot.Avalonia;
 using Xunit;
@@ -39,7 +40,7 @@ public class TrainViewTests
         Assert.Contains("epochs", texts);
         Assert.Contains("batch", texts);
         Assert.Contains("imgsz", texts);
-        Assert.Contains("best.safetensors", texts);
+        Assert.Contains(Localizer.Instance.Get("Train.ProductFile"), texts);
     }
 
     [AvaloniaFact]
@@ -60,6 +61,45 @@ public class TrainViewTests
             picker => picker.ItemCount == host.ViewModel.Train.ModelFamilies.Count);
 
         Assert.Same(host.ViewModel.Train.SelectedModel, modelPicker.SelectedItem);
+    }
+
+    /// <summary>参数对话框要能起来：x:Name 写错、提示控件缺失都会在这里炸，而不是在用户点「修改」的时候。</summary>
+    [AvaloniaFact]
+    public void Params_Dialog_Opens_With_Detr_Hints()
+    {
+        var dialog = new TrainingParamsDialog(100m, 4m, 640m, "rfdetr");
+
+        Assert.NotNull(dialog);
+    }
+
+    /// <summary>三个检测单选的绑定：点哪个就换哪个模型，检测时按它的前缀取 onnx。</summary>
+    [AvaloniaFact]
+    public async Task Detect_Model_Radios_Switch_Selection()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+        MainWindow window = host.CreateMainWindow();
+
+        TestUi.Show(window);
+        TestUi.SwitchToTraining(window);
+
+        TrainView view = TestUi.Train(window);
+        List<RadioButton> radios =
+        [
+            .. view.GetVisualDescendants()
+                .OfType<RadioButton>()
+                .Where(radio => radio.Content is "YOLOv8" or "YOLOv11" or "RF-DETR")
+        ];
+
+        Assert.Equal(3, radios.Count);
+        Assert.Equal("yolov8", host.ViewModel.Train.SelectedDetectModel.FilePrefix);
+
+        radios.Single(radio => (string?)radio.Content == "RF-DETR").IsChecked = true;
+        Assert.Equal("rfdetr", host.ViewModel.Train.SelectedDetectModel.FilePrefix);
+        Assert.True(host.ViewModel.Train.IsDetectRfDetr);
+
+        radios.Single(radio => (string?)radio.Content == "YOLOv11").IsChecked = true;
+        Assert.Equal("yolov11", host.ViewModel.Train.SelectedDetectModel.FilePrefix);
+        Assert.True(host.ViewModel.Train.IsDetectYolov11);
     }
 
     [AvaloniaFact]

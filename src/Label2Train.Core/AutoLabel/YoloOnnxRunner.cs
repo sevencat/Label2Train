@@ -70,12 +70,17 @@ public sealed class YoloOnnxRunner : IAutoLabelRunner
             TargetHeight = defaults.TargetHeight,
         };
 
+        // OnnxSharp 的 Preprocess 只接受「紧凑 3 字节」像素（BGR/RGB），
+        // 传 BGRA 会让它按 3 字节步进读取 4 字节数据：每行错位累积，图像被撕成竖条纹，
+        // 模型实际看到的是一张噪声图（检测框位置、类别、置信度全错）。
+        byte[] bgr = ToPackedBgr(bgra, width, height);
+
         (Tensor input, Letterbox transform) = _detector.Preprocess(
-            bgra,
+            bgr,
             width,
             height,
             bgr: true,
-            rowStride: width * 4);
+            rowStride: width * 3);
 
         _detector.Net.SetInput(_detector.InputName, input);
         Tensor output = _detector.Net.Forward();
@@ -115,8 +120,24 @@ public sealed class YoloOnnxRunner : IAutoLabelRunner
         return candidates;
     }
 
+    /// <summary>把 BGRA 拆成紧凑的 BGR（去掉 alpha，每像素 3 字节）。</summary>
+    internal static byte[] ToPackedBgr(ReadOnlySpan<byte> bgra, int width, int height)
+    {
+        int pixels = width * height;
+        var bgr = new byte[pixels * 3];
+
+        for (int i = 0, src = 0, dst = 0; i < pixels; i++, src += 4, dst += 3)
+        {
+            bgr[dst] = bgra[src];
+            bgr[dst + 1] = bgra[src + 1];
+            bgr[dst + 2] = bgra[src + 2];
+        }
+
+        return bgr;
+    }
+
     /// <summary>项目类别映射优先，其次模型自带类别名，最后退回 <c>class_{id}</c>。</summary>
-    private static string ResolveLabel(int classId, AutoLabelOptions options)
+    internal static string ResolveLabel(int classId, AutoLabelOptions options)
     {
         if (options.ClassMap is { } map
             && map.TryGetValue(classId, out string? mapped)

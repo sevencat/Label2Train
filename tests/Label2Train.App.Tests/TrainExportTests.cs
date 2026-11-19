@@ -19,6 +19,9 @@ public class TrainExportTests
 {
     private const string Architecture = "yolov8n-detect-2";
 
+    /// <summary>导出文件名前缀：按架构自动取，yolov8* → <c>yolov8</c>，不再叫 best。</summary>
+    private const string ExportPrefix = "yolov8";
+
     [AvaloniaFact]
     public async Task Export_Lands_In_Project_Models_Directory()
     {
@@ -32,12 +35,13 @@ public class TrainExportTests
         Assert.Equal(expected, train.ExportDirectory);
         Assert.True(await train.ExportAsync(withOnnx: true));
 
-        Assert.True(File.Exists(Path.Combine(expected, TrainingExportService.WeightsFileName)));
-        Assert.True(File.Exists(Path.Combine(expected, TrainingExportService.ConfigFileName)));
-        Assert.True(File.Exists(Path.Combine(expected, TrainingExportService.OnnxFileName)));
+        Assert.True(File.Exists(Path.Combine(expected, ExportPrefix + ".safetensors")));
+        Assert.True(File.Exists(Path.Combine(expected, ExportPrefix + ".json")));
+        Assert.True(File.Exists(Path.Combine(expected, ExportPrefix + ".onnx")));
 
-        // 导出的 ONNX 立刻成为检测用的模型
-        Assert.Equal(Path.Combine(expected, TrainingExportService.OnnxFileName), train.LastOnnxPath);
+        // 导出的 ONNX 立刻成为检测用的模型，检测单选也跟着切到对应家族
+        Assert.Equal(Path.Combine(expected, ExportPrefix + ".onnx"), train.LastOnnxPath);
+        Assert.Equal(ExportPrefix, train.SelectedDetectModel.FilePrefix);
     }
 
     [AvaloniaFact]
@@ -50,10 +54,129 @@ public class TrainExportTests
 
         await train.StartTrainingAsync();
 
-        string onnx = Path.Combine(train.ExportDirectory, TrainingExportService.OnnxFileName);
+        string onnx = Path.Combine(train.ExportDirectory, ExportPrefix + ".onnx");
 
         Assert.True(File.Exists(onnx), $"训练结束应自动导出到 {onnx}");
         Assert.Contains(TinyLabelWorkspace.ModelsFolderName, train.ExportDirectory, StringComparison.Ordinal);
+    }
+
+    /// <summary>导出文件名按架构取，不再统一叫 best——三个模型要能同时在 models 目录里活着。</summary>
+    [Theory]
+    [InlineData("yolov8n-detect-2", "yolov8")]
+    [InlineData("yolo11n-detect-2", "yolov11")]
+    [InlineData("rfdetr-detect-2", "rfdetr")]
+    [InlineData("simple-detr-detect-2", "simple-detr")]
+    public void Export_Prefix_Follows_Architecture(string architecture, string expected)
+    {
+        Assert.Equal(expected, TrainingExportService.PrefixFor(architecture));
+    }
+
+    /// <summary>没选项目或没选输出路径时「开始训练」必须是灰的。</summary>
+    [AvaloniaFact]
+    public async Task Start_Is_Grey_Until_Dataset_And_Output_Are_Set()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+        TrainViewModel train = host.ViewModel.Train;
+
+        Assert.False(train.CanStart);
+
+        await OpenSyntheticProjectAsync(host);
+        Assert.True(train.CanStart);
+
+        train.OutputDirectory = "   ";
+        Assert.False(train.CanStart);
+    }
+
+    /// <summary>
+    /// RF-DETR 的 onnx 要同时过 patch 14 与下采样 16，边长得是 112 的倍数；
+    /// 训完才发现导不出来太亏，所以参数不合法时直接不让开始。
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Start_Is_Grey_When_RfDetr_ImageSize_Cannot_Export()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+        (TrainViewModel train, _) = await OpenSyntheticProjectAsync(host);
+
+        train.SelectedModel = train.ModelFamilies.Single(model => model.Id == "rfdetr");
+
+        Assert.False(train.IsImageSizeAllowed);
+        Assert.False(train.CanStart);
+
+        train.ImageSize = TrainingPresets.RfDetr.ImageSize;
+
+        Assert.True(train.IsImageSizeAllowed);
+        Assert.True(train.CanStart);
+
+        // YOLO 家族不受这条约束
+        train.SelectedModel = train.ModelFamilies.Single(model => model.Id == "v8");
+        train.ImageSize = 640;
+
+        Assert.True(train.CanStart);
+    }
+
+    [Theory]
+    [InlineData(336, true)]
+    [InlineData(448, true)]
+    [InlineData(560, true)]
+    [InlineData(640, false)]
+    [InlineData(518, false)]
+    public void Detr_ImageSize_Must_Be_Multiple_Of_112(int size, bool valid)
+    {
+        Assert.Equal(valid, TrainingPresets.IsValidDetrImageSize(size));
+    }
+
+    [Theory]
+    [InlineData(640, 672)]
+    [InlineData(518, 560)]
+    [InlineData(100, 112)]
+    public void Nearest_Valid_Detr_ImageSize_Is_Used_As_Suggestion(int input, int expected)
+    {
+        Assert.Equal(expected, TrainingPresets.NearestValidDetrImageSize(input));
+    }
+
+    /// <summary>
+    /// 检测单选必须严格对应前缀：选 YOLOv8 只认 <c>yolov8.onnx</c>，没有就返回空——
+    /// 拿 yolov11 / rfdetr 的权重顶上，框会整体错，DETR 还会直接崩在输出名上。
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Detect_Model_Path_Follows_Selection_Strictly()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+        (TrainViewModel train, _) = await OpenSyntheticProjectAsync(host);
+
+        string directory = train.ExportDirectory;
+        Directory.CreateDirectory(directory);
+
+        // 只导出了 v11
+        File.WriteAllBytes(Path.Combine(directory, "yolov11.onnx"), [0]);
+
+        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "yolov11");
+        Assert.Equal(Path.Combine(directory, "yolov11.onnx"), train.ResolveDetectModelPath());
+
+        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "yolov8");
+        Assert.Equal(string.Empty, train.ResolveDetectModelPath());
+
+        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "rfdetr");
+        Assert.Equal(string.Empty, train.ResolveDetectModelPath());
+
+        // rfdetr 导出后，选 RF-DETR 才拿到它；选 YOLO 依然是空
+        File.WriteAllBytes(Path.Combine(directory, "rfdetr.onnx"), [0]);
+        Assert.Equal(Path.Combine(directory, "rfdetr.onnx"), train.ResolveDetectModelPath());
+
+        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "yolov8");
+        Assert.Equal(string.Empty, train.ResolveDetectModelPath());
+
+        // 旧版 best.onnx 只给 YOLOv8 兼容，v11 不猜
+        File.Delete(Path.Combine(directory, "yolov11.onnx"));
+        File.WriteAllBytes(Path.Combine(directory, TrainingExportService.OnnxFileName), [0]);
+
+        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "yolov11");
+        Assert.Equal(string.Empty, train.ResolveDetectModelPath());
+
+        train.SelectedDetectModel = train.DetectModels.Single(model => model.FilePrefix == "yolov8");
+        Assert.Equal(
+            Path.Combine(directory, TrainingExportService.OnnxFileName),
+            train.ResolveDetectModelPath());
     }
 
     [AvaloniaFact]

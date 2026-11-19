@@ -2,6 +2,7 @@ using System.Globalization;
 using Label2Train.Train.Core;
 using Label2Train.Train.IO.Onnx;
 using Label2Train.Train.Models.RfDetr;
+using Label2Train.Train.Training;
 using TorchSharp;
 using static TorchSharp.torch;
 
@@ -34,8 +35,17 @@ public static class RfDetrOnnxExporter
         ArgumentNullException.ThrowIfNull(detector);
 
         DinoV2Config config = detector.BackboneConfig;
-        if (imageHeight % 16 != 0 || imageWidth % 16 != 0)
-            throw new ArgumentException($"输入高宽必须是 16 的倍数，实际 {imageHeight}x{imageWidth}。", nameof(imageHeight));
+
+        // 两个约束叠在一起：主干按 patch 14 切图，检测头按 16 下采样，
+        // 所以边长得是 lcm(14, 16) = 112 的倍数（560 就是官方那个尺寸）。
+        if (!TrainingPresets.IsValidDetrImageSize(imageHeight) || !TrainingPresets.IsValidDetrImageSize(imageWidth))
+        {
+            throw new ArgumentException(
+                $"RF-DETR 的输入边长必须是 {TrainingPresets.DetrImageSizeStride} 的倍数"
+                + "（DINOv2 的 patch 14 与检测头的下采样 16 都要整除），例如 336 / 448 / 560 / 672；"
+                + $"实际 {imageHeight}x{imageWidth}。",
+                nameof(imageHeight));
+        }
         if (config.WindowSize > 0)
         {
             throw new NotSupportedException(

@@ -11,9 +11,9 @@ namespace Label2Train.Train.Export;
 
 /// <summary>导出结果：目标目录里落了哪些文件。</summary>
 /// <param name="Directory">导出目录。</param>
-/// <param name="SafetensorsPath">复制过去的 <c>best.safetensors</c>。</param>
-/// <param name="ConfigPath">配套的 <c>model.json</c>。</param>
-/// <param name="OnnxPath">导出的 <c>best.onnx</c>；没要求导出 ONNX 时为 <c>null</c>。</param>
+/// <param name="SafetensorsPath">复制过去的权重（<c>{模型名}.safetensors</c>）。</param>
+/// <param name="ConfigPath">配套的配置（<c>{模型名}.json</c>）。</param>
+/// <param name="OnnxPath">导出的 ONNX（<c>{模型名}.onnx</c>）；没要求导出 ONNX 时为 <c>null</c>。</param>
 public sealed record TrainingExportResult(
     string Directory,
     string SafetensorsPath,
@@ -22,8 +22,13 @@ public sealed record TrainingExportResult(
 
 /// <summary>
 /// 把一次训练的产物导成能直接用的模型文件：
-/// <c>best.safetensors</c> + <c>model.json</c>（架构 / 类别 / 输入尺寸），
-/// 以及可交付的 <c>best.onnx</c>。
+/// <c>{模型名}.safetensors</c> + <c>{模型名}.json</c>（架构 / 类别 / 输入尺寸），
+/// 以及可交付的 <c>{模型名}.onnx</c>。
+/// <para>
+/// 文件名前缀按架构取（<c>yolov8</c> / <c>yolov11</c> / <c>rfdetr</c> / <c>simple-detr</c>），
+/// 同一个项目的 <c>models</c> 目录里可以同时放三种模型，检测时按前缀挑：
+/// 用 <c>best</c> 做前缀的话后训练的那个会把前一个覆盖掉。
+/// </para>
 /// <para>
 /// 支持三种架构，按检查点元数据里的 <c>architecture</c> 分派：
 /// <c>yolov8*</c> / <c>yolo11*</c>（YOLO）、<c>rfdetr-detect-N</c>（RF-DETR）、
@@ -33,23 +38,61 @@ public sealed record TrainingExportResult(
 /// </summary>
 public sealed class TrainingExportService
 {
-    /// <summary>训练产物里的最优权重文件名。</summary>
+    /// <summary>训练输出目录里的最优权重文件名（导出时会按模型名改名）。</summary>
     public const string WeightsFileName = "best.safetensors";
 
-    /// <summary>导出的配置文件名。</summary>
+    /// <summary>旧版导出用的配置文件名；现在只在读取老目录时用。</summary>
     public const string ConfigFileName = "model.json";
 
-    /// <summary>导出的 ONNX 文件名。</summary>
+    /// <summary>旧版导出用的 ONNX 文件名；检测找不到新名字时回退到它。</summary>
     public const string OnnxFileName = "best.onnx";
 
     private const string RfDetrPrefix = "rfdetr";
     private const string SimpleDetrPrefix = "simple-detr";
+    private const string V8Prefix = "yolov8";
+    private const string V11Prefix = "yolo11";
+
+    /// <summary>
+    /// 架构 → 导出文件名前缀：<c>yolov8*</c>→<c>yolov8</c>、<c>yolo11*</c>→<c>yolov11</c>、
+    /// <c>rfdetr*</c>→<c>rfdetr</c>、<c>simple-detr*</c>→<c>simple-detr</c>。
+    /// </summary>
+    public static string PrefixFor(string architecture)
+    {
+        string text = (architecture ?? string.Empty).Trim();
+
+        if (text.StartsWith(V11Prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return "yolov11";
+        }
+
+        if (text.StartsWith(V8Prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return V8Prefix;
+        }
+
+        if (text.StartsWith(RfDetrPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return RfDetrPrefix;
+        }
+
+        if (text.StartsWith(SimpleDetrPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return SimpleDetrPrefix;
+        }
+
+        return "model";
+    }
 
     /// <summary>
     /// 导出。<paramref name="runDirectory"/> 是训练输出目录（里面有 best.safetensors / train.json），
     /// <paramref name="targetDirectory"/> 是导出目录（例如 <c>{输出目录}/export</c>）。
+    /// <paramref name="filePrefix"/> 为空时按架构自动取名（yolov8 / yolov11 / rfdetr）。
     /// </summary>
-    public TrainingExportResult Export(string runDirectory, string targetDirectory, bool exportOnnx)
+    public TrainingExportResult Export(
+        string runDirectory,
+        string targetDirectory,
+        bool exportOnnx,
+        string? filePrefix = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(runDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(targetDirectory);
@@ -77,11 +120,15 @@ public sealed class TrainingExportService
         int imageSize = ReadInt(checkpoint.Metadata, "image_size", 640);
         IReadOnlyList<string> classNames = ReadClassNames(runDirectory);
 
-        string weights = Path.Combine(targetDirectory, WeightsFileName);
+        // 产物按模型名落盘：同一个 models 目录要能同时放 yolov8 / yolov11 / rfdetr 三个模型
+        string prefix = string.IsNullOrWhiteSpace(filePrefix) ? PrefixFor(architecture) : filePrefix.Trim();
+        string onnxName = prefix + ".onnx";
+
+        string weights = Path.Combine(targetDirectory, prefix + ".safetensors");
         File.Copy(source, weights, overwrite: true);
 
         string? onnx = null;
-        string config = Path.Combine(targetDirectory, ConfigFileName);
+        string config = Path.Combine(targetDirectory, prefix + ".json");
 
         if (YoloArchitectures.TryParseFamily(architecture, out _))
         {
@@ -89,7 +136,7 @@ public sealed class TrainingExportService
 
             if (exportOnnx)
             {
-                onnx = Path.Combine(targetDirectory, OnnxFileName);
+                onnx = Path.Combine(targetDirectory, onnxName);
 
                 using YoloDetectionModel model = YoloArchitectures.CreateFromArchitecture(device, architecture);
                 checkpoint.LoadInto(model, device, strict: false);
@@ -105,7 +152,7 @@ public sealed class TrainingExportService
                 imageSize,
                 classNames,
                 checkpoint.Metadata,
-                onnx);
+                onnx is null ? null : onnxName);
         }
         else if (TryParseDetr(architecture, out bool useRfDetr, out int classCount))
         {
@@ -119,7 +166,7 @@ public sealed class TrainingExportService
 
             if (exportOnnx)
             {
-                onnx = Path.Combine(targetDirectory, OnnxFileName);
+                onnx = Path.Combine(targetDirectory, onnxName);
 
                 if (useRfDetr)
                 {
@@ -171,7 +218,7 @@ public sealed class TrainingExportService
                 dinoHeads,
                 classNames,
                 checkpoint.Metadata,
-                onnx);
+                onnx is null ? null : onnxName);
         }
         else
         {
@@ -193,7 +240,7 @@ public sealed class TrainingExportService
         int imageSize,
         IReadOnlyList<string> classNames,
         IReadOnlyDictionary<string, string> metadata,
-        string? onnxPath)
+        string? onnxFileName)
     {
         // Utf8JsonWriter 直接写：不依赖反射 / 源生成，AOT 或禁用反射的环境同样能导出
         using FileStream stream = File.Create(path);
@@ -223,7 +270,7 @@ public sealed class TrainingExportService
         writer.WriteEndArray();
         writer.WriteEndObject();
 
-        WriteOnnxAndBest(writer, metadata, onnxPath);
+        WriteOnnxAndBest(writer, metadata, onnxFileName);
         writer.WriteEndObject();
         writer.Flush();
     }
@@ -243,7 +290,7 @@ public sealed class TrainingExportService
         int dinoHeads,
         IReadOnlyList<string> classNames,
         IReadOnlyDictionary<string, string> metadata,
-        string? onnxPath)
+        string? onnxFileName)
     {
         using FileStream stream = File.Create(path);
         using var writer = new Utf8JsonWriter(stream, new JsonWriterOptions { Indented = true });
@@ -285,7 +332,7 @@ public sealed class TrainingExportService
 
         writer.WriteEndArray();
 
-        WriteOnnxAndBest(writer, metadata, onnxPath);
+        WriteOnnxAndBest(writer, metadata, onnxFileName);
         writer.WriteEndObject();
         writer.Flush();
     }
@@ -317,15 +364,15 @@ public sealed class TrainingExportService
     private static void WriteOnnxAndBest(
         Utf8JsonWriter writer,
         IReadOnlyDictionary<string, string> metadata,
-        string? onnxPath)
+        string? onnxFileName)
     {
-        if (onnxPath is null)
+        if (onnxFileName is null)
         {
             writer.WriteNull("onnx");
         }
         else
         {
-            writer.WriteString("onnx", OnnxFileName);
+            writer.WriteString("onnx", onnxFileName);
         }
 
         writer.WriteStartObject("best");
