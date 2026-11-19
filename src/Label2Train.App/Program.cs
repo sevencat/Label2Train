@@ -3,6 +3,7 @@ using ImageFacade;
 using ImageFacade.SkiaSharp;
 using Label2Train.Core.Imaging;
 using Label2Train.Core.Infrastructure;
+using SimdSkia.Avalonia;
 
 namespace Label2Train.App;
 
@@ -35,11 +36,12 @@ internal static class Program
                 .GetAwaiter().GetResult();
         }
 
-        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        return BuildSimdSkiaApp().StartWithClassicDesktopLifetime(args);
     }
 
     public static AppBuilder BuildAvaloniaApp()
-        => AppBuilder.Configure<App>()
+    {
+        return AppBuilder.Configure<App>()
             .UseHarfBuzz()
             .UseWin32()
             .UseSkia()
@@ -51,4 +53,12 @@ internal static class Program
             })
             .WithInterFont()
             .LogToTrace();
+    }
+
+    public static AppBuilder BuildSimdSkiaApp()
+    {
+        return AppBuilder.Configure<App>()
+            .UseSimdSkiaDesktop()
+            .LogToTrace();
+    }
 }

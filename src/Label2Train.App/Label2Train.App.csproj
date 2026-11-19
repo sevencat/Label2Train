@@ -46,6 +46,7 @@
     <PackageReference Include="HarfBuzzSharp.NativeAssets.Linux" ExcludeAssets="all" />
     <PackageReference Include="HarfBuzzSharp.NativeAssets.macOS" ExcludeAssets="all" />
     <PackageReference Include="HarfBuzzSharp.NativeAssets.WebAssembly" ExcludeAssets="all" />
+    <PackageReference Include="SimdSkia.Avalonia.Desktop" />
     <PackageReference Include="SkiaSharp.NativeAssets.Linux" ExcludeAssets="all" />
     <PackageReference Include="SkiaSharp.NativeAssets.macOS" ExcludeAssets="all" />
     <PackageReference Include="SkiaSharp.NativeAssets.WebAssembly" ExcludeAssets="all" />
