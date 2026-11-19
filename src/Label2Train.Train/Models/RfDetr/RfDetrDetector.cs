@@ -103,6 +103,7 @@ public sealed class RfDetrDetector : Module<Tensor, Tensor>, ILossExtrasProvider
         Queries = queries;
         LevelCount = levels;
         DeformPoints = points;
+        AttentionHeads = heads;
         DecoderHeads = decoderHeads > 0 ? decoderHeads : heads;
         UsesRefPointHead = useRefPointHead;
         UsesTwoStage = useTwoStage;
@@ -238,6 +239,9 @@ public sealed class RfDetrDetector : Module<Tensor, Tensor>, ILossExtrasProvider
 
     /// <summary>多尺度档数（官方 1，最多 4 档：1/4、1/8、1/16、1/32）。</summary>
     public int LevelCount { get; }
+
+    /// <summary>自注意力（编码器与解码器 <c>self_attn</c>）头数（官方 8）。</summary>
+    public int AttentionHeads { get; }
 
     /// <summary>解码器可变形注意力头数（官方 16）。</summary>
     public int DecoderHeads { get; }

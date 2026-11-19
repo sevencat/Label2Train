@@ -161,7 +161,7 @@ public static class RfDetrOnnxExporter
                 $"{prefix}self_attn",
                 context.AppendLayerNorm($"{prefix}norm1", memory, $"rf.enc{index}.norm1"),
                 count,
-                heads,
+                detector.AttentionHeads,
                 $"rf.enc{index}.self");
 
             memory = context.AppendAdd(memory, self, $"rf.enc{index}.sum1");
@@ -238,10 +238,10 @@ public static class RfDetrOnnxExporter
                     detector.Queries,
                     $"rf.dec{index}.refpoint");
 
-                layerInput = context.AppendAdd(
-                    queries,
-                    context.AppendMlp("ref_point_head.layers", encoded, $"rf.dec{index}.refpoint.mlp", layerCount: 2),
-                    $"rf.dec{index}.refpoint.sum");
+                string head = context.AppendMlp(
+                    "ref_point_head.layers", encoded, $"rf.dec{index}.refpoint.mlp", layerCount: 2);
+
+                layerInput = context.AppendAdd(queries, head, $"rf.dec{index}.refpoint.sum");
             }
 
             string points = context.AppendExpand(
@@ -253,10 +253,11 @@ public static class RfDetrOnnxExporter
                 $"{prefix}self_attn",
                 context.AppendLayerNorm($"{prefix}norm1", layerInput, $"rf.dec{index}.norm1"),
                 detector.Queries,
-                decoderHeads,
+                detector.AttentionHeads,
                 $"rf.dec{index}.self");
 
-            queries = context.AppendAdd(queries, self, $"rf.dec{index}.sum1");
+            // 残差基必须是 layerInput（= queries + ref_point_head 编码），而不是上一层的 queries
+            queries = context.AppendAdd(layerInput, self, $"rf.dec{index}.sum1");
 
             string deformed = DeformAttnOnnxExporter.Append(
                 builder,
@@ -841,11 +842,13 @@ public static class RfDetrOnnxExporter
         /// </summary>
         public string AppendSineEmbed(string input, int dimensions, int embedding, int queries, string hint)
         {
-            int feats = embedding / dimensions;
-            var scales = new float[feats];
+            // feats 固定按 D/4 算（与 RfDetrDetector.SineEmbed 一致，官方即 4 个坐标共 2D 维）
+            int feats = embedding / 4;
 
-            for (int index = 0; index < feats; index++)
-                scales[index] = MathF.Pow(10000f, (float)index / feats);
+            // 频率表用 torch 算出来写成常量，避免 MathF.Pow 与 torch.pow 在 float32 上的细微分歧
+            using Tensor exponent = torch.arange(feats, dtype: ScalarType.Float32) / feats;
+            using Tensor scaleTensor = torch.pow(torch.tensor(10000.0, dtype: ScalarType.Float32), exponent);
+            float[] scales = scaleTensor.data<float>().ToArray();
 
             string expanded = AppendUnsqueeze(input, hint + ".unsqueeze", axis: 3);
             string doubled = AppendMul(

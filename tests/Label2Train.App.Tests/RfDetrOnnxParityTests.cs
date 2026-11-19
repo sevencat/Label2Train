@@ -4,6 +4,11 @@ using OnnxSharp.Core;
 using TorchSharp;
 using Xunit;
 using static TorchSharp.torch;
+// OnnxSharp 也有 <c>RfDetrDetector</c>，这里只借用它的解码器，避免与训练侧的检测器重名
+using RfDetrDecoder = OnnxSharp.Vision.RfDetrDecoder;
+using RfDetrOptions = OnnxSharp.Vision.RfDetrOptions;
+using Detection = OnnxSharp.Vision.Detection;
+using ChannelNormalization = OnnxSharp.Vision.ChannelNormalization;
 
 namespace Label2Train.App.Tests;
 
@@ -21,6 +26,9 @@ public sealed class RfDetrOnnxParityTests
         const int queries = 20;
         const int size = 336;   // 同时是 14（patch）与 16（位置网格）的倍数
         string path = Path.Combine(Path.GetTempPath(), $"label2train-rfdetr-parity-{Guid.NewGuid():N}.onnx");
+
+        // 固定权重与输入：随机初始化偶尔会给出极端激活，让对拍变成不可复现的失败
+        torch.manual_seed(1234);
 
         try
         {
@@ -124,6 +132,143 @@ public sealed class RfDetrOnnxParityTests
         }
     }
 
+    /// <summary>
+    /// 端到端检测：同一张输入分别走 torch 前向与 OnnxSharp 推理，再把两侧的
+    /// <c>boxes</c> / <c>logits</c> 都交给 OnnxSharp 的 RF-DETR 检测接口（<see cref="RfDetrDecoder"/>）
+    /// 解码，比较最终检测列表。权重文件不在本机时跳过。
+    /// </summary>
+    [Fact]
+    public void Exported_Official_RfDetr_Detections_Match_Torch_Decoding()
+    {
+        const int classCount = 3;
+        const int size = 224;
+
+        string weights = Path.Combine("F:\\ai\\rfdetr", "model.safetensors");
+
+        if (!File.Exists(weights))
+        {
+            return;
+        }
+
+        RfDetrWeightsInfo? info = RfDetrWeightsProbe.Inspect(weights);
+
+        Assert.NotNull(info);
+
+        string path = Path.Combine(Path.GetTempPath(), $"label2train-rfdetr-detect-{Guid.NewGuid():N}.onnx");
+
+        try
+        {
+            float[] pixels;
+            float[] expectedBoxes;
+            float[] expectedLogits;
+
+            using (var detector = new RfDetrDetector(
+                classCount,
+                info.Queries,
+                new DinoV2Config(
+                    ImageSize: info.ImageSize,
+                    PatchSize: info.PatchSize,
+                    EmbeddingSize: info.EmbeddingSize,
+                    Depth: info.Depth,
+                    Heads: info.Heads),
+                heads: 8,
+                device: torch.CPU,
+                encoderLayers: 0,
+                decoderLayers: info.DecoderLayers,
+                ffnSize: 2048,
+                points: info.DeformPoints,
+                levels: info.DeformLevels,
+                decoderHeads: info.DecoderHeads,
+                useRefPointHead: true,
+                useC2fProjector: info.HasC2fProjector))
+            {
+                RfDetrPretrained.Apply(detector, weights, torch.CPU, info);
+
+                using Tensor input = torch.rand(new long[] { 1, 3, size, size });
+                pixels = input.flatten().data<float>().ToArray();
+
+                using Tensor output = detector.forward(input);
+                using Tensor boxes = output.narrow(2, 0, 4).contiguous();
+                using Tensor logits = output.narrow(2, 4, classCount).contiguous();
+
+                expectedBoxes = boxes.flatten().data<float>().ToArray();
+                expectedLogits = logits.flatten().data<float>().ToArray();
+
+                RfDetrOnnxExporter.Save(detector, path, size, size);
+            }
+
+            Net net = Net.ReadModel(path);
+            net.SetInput(
+                RfDetrOnnxExporter.InputName,
+                OnnxSharp.Tensors.Tensor.FromArray(
+                    pixels, new OnnxSharp.Tensors.TensorShape(1, 3, size, size)));
+
+            List<OnnxSharp.Tensors.Tensor> outputs = net.ForwardAll();
+            IReadOnlyList<string> names = net.OutputNames;
+
+            float[] boxesArray = Take(outputs, names, RfDetrOnnxExporter.BoxesOutputName);
+            float[] logitsArray = Take(outputs, names, RfDetrOnnxExporter.LogitsOutputName);
+
+            var decoderOptions = new RfDetrOptions
+            {
+                // 不设阈值：所有 query 都参与解码，随机权重下也一定有东西可比
+                Confidence = 0.0001f,
+                MaxDetections = 300,
+                BackgroundClassId = null,
+                Normalization = ChannelNormalization.Divide255,
+            };
+
+            IReadOnlyList<Detection> expected = RfDetrDecoder.Decode(
+                DecoderInput(expectedBoxes, info.Queries, 4),
+                DecoderInput(expectedLogits, info.Queries, classCount),
+                size,
+                size,
+                decoderOptions);
+
+            IReadOnlyList<Detection> actual = RfDetrDecoder.Decode(
+                DecoderInput(boxesArray, info.Queries, 4),
+                DecoderInput(logitsArray, info.Queries, classCount),
+                size,
+                size,
+                decoderOptions);
+
+            Assert.Equal(expected.Count, actual.Count);
+
+            double worst = 0;
+
+            for (int index = 0; index < expected.Count; index++)
+            {
+                Detection left = expected[index];
+                Detection right = actual[index];
+
+                Assert.Equal(left.ClassId, right.ClassId);
+
+                worst = Math.Max(worst, Math.Abs(left.X - right.X));
+                worst = Math.Max(worst, Math.Abs(left.Y - right.Y));
+                worst = Math.Max(worst, Math.Abs(left.Right - right.Right));
+                worst = Math.Max(worst, Math.Abs(left.Bottom - right.Bottom));
+                worst = Math.Max(worst, Math.Abs(left.Score - right.Score) * size);
+            }
+
+            // 框坐标按像素比：1e-3 相对量级在 224 输入上约 0.22px
+            Assert.True(
+                worst < 0.5,
+                $"ONNX 与 torch 的检测结果不一致：最大偏差 {worst:F3}（{expected.Count} 个检测）");
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    /// <summary>把 <c>[1,Q,C]</c> 的扁平数组包成 OnnxSharp 张量，供解码器使用。</summary>
+    private static OnnxSharp.Tensors.Tensor DecoderInput(float[] values, int queries, int channels) =>
+        OnnxSharp.Tensors.Tensor.FromArray(
+            values, new OnnxSharp.Tensors.TensorShape(1, queries, channels));
+
     /// <summary>跑 ONNX 并与 torch 的 <c>[1,Q,4+C]</c> 输出逐元素比较。</summary>
     private static void Compare(
         string path, float[] pixels, int size, int queries, int classCount, float[] expected)
@@ -145,23 +290,25 @@ public sealed class RfDetrOnnxParityTests
         Assert.Equal(queries * classCount, logits.Length);
 
         int stride = 4 + classCount;
-        double worst = 0;
+        double boxWorst = 0;
+        double logitWorst = 0;
 
         for (int query = 0; query < queries; query++)
         {
             for (int index = 0; index < 4; index++)
-                worst = Math.Max(worst, Math.Abs(expected[query * stride + index] - boxes[query * 4 + index]));
+                boxWorst = Math.Max(boxWorst, Math.Abs(expected[query * stride + index] - boxes[query * 4 + index]));
 
             for (int index = 0; index < classCount; index++)
             {
-                worst = Math.Max(
-                    worst,
+                logitWorst = Math.Max(
+                    logitWorst,
                     Math.Abs(expected[query * stride + 4 + index] - logits[query * classCount + index]));
             }
         }
 
-        // bicubic 插值（pos_embed）与批统计量 BN 都有浮点差异，1e-3 足够严到能发现结构性错误
-        Assert.True(worst < 1e-3, $"ONNX 与 torch 的输出现不一致：最大误差 {worst:E3}");
+        Assert.True(
+            boxWorst < 1e-3 && logitWorst < 1e-3,
+            $"ONNX 与 torch 的输出现不一致：box 误差 {boxWorst:E3}，logit 误差 {logitWorst:E3}");
     }
 
     private static float[] Take(

@@ -138,7 +138,9 @@ public static class DinoV2OnnxExporter
             new[] { withCls },
             OnnxAttribute.Int("axis", 1));
 
-        string positioned = context.AppendAdd(withCls, AppendPosition(context, config, tokens, side), "tokens.positioned");
+        string positionName = AppendPosition(context, config, tokens, side);
+
+        string positioned = context.AppendAdd(withCls, positionName, "tokens.positioned");
 
         string current = positioned;
         var maps = new List<string>();
