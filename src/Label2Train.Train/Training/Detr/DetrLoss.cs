@@ -19,6 +19,12 @@ public sealed class DetrLoss : ILoss
     private readonly DetrLossOptions _options;
     private readonly int _groupDetr;
 
+    // 分项累积（加权），由 AverageParts / ResetParts 读写
+    private float _classPart;
+    private float _l1Part;
+    private float _giouPart;
+    private int _partSteps;
+
     /// <summary>上一次 <see cref="Compute"/> 实际匹配到的（query, gt）对数：诊断用。</summary>
     public int LastMatchedPairs { get; private set; }
 
@@ -133,8 +139,27 @@ public sealed class DetrLoss : ILoss
             + giouLoss * _options.GiouWeight;
     }
 
-    /// <summary>最近一次的分项值（调试 / 日志用）。</summary>
+    /// <summary>最近一次的分项值（未乘权重，调试用）。</summary>
     public (float Class, float L1, float Giou) LastParts { get; private set; }
+
+    /// <summary>
+    /// 自上次 <see cref="ResetParts"/> 起各分项的**加权**平均（分类 / L1 / GIoU）。
+    /// 三项相加即 epoch 平均 loss 的构成（去噪 / 两阶段的额外项不计入），
+    /// 用来分辨「分类项压不下来」还是「框回归没收敛」。
+    /// </summary>
+    public (float Class, float L1, float Giou) AverageParts =>
+        _partSteps == 0
+            ? (0f, 0f, 0f)
+            : (_classPart / _partSteps, _l1Part / _partSteps, _giouPart / _partSteps);
+
+    /// <summary>清空分项累积（每个 epoch 评估结束后由训练循环调用）。</summary>
+    public void ResetParts()
+    {
+        _classPart = 0f;
+        _l1Part = 0f;
+        _giouPart = 0f;
+        _partSteps = 0;
+    }
 
     /// <inheritdoc />
     public string Name => "rf-detr-set-loss";
@@ -243,10 +268,17 @@ public sealed class DetrLoss : ILoss
             giouLoss = (1f - Giou(predictedBoxes, matchedTargets)).mean();
         }
 
-        LastParts = (
-            TorchInterop.ToScalar(classLoss),
-            TorchInterop.ToScalar(boxLoss),
-            TorchInterop.ToScalar(giouLoss));
+        float classValue = TorchInterop.ToScalar(classLoss);
+        float boxValue = TorchInterop.ToScalar(boxLoss);
+        float giouValue = TorchInterop.ToScalar(giouLoss);
+
+        LastParts = (classValue, boxValue, giouValue);
+
+        // 标量已在上面读回，这里只做乘加，不额外同步设备
+        _classPart += classValue * _options.ClassWeight;
+        _l1Part += boxValue * _options.L1Weight;
+        _giouPart += giouValue * _options.GiouWeight;
+        _partSteps++;
 
         return classLoss * _options.ClassWeight
             + boxLoss * _options.L1Weight

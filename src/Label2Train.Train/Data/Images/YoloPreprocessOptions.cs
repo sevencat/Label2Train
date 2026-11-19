@@ -9,11 +9,18 @@ namespace Label2Train.Train.Data.Images;
 /// </remarks>
 public sealed record YoloPreprocessOptions
 {
-    /// <summary>网络输入宽（必须是 32 的倍数）。</summary>
+    /// <summary>网络输入宽（必须是 <see cref="SizeStride"/> 的倍数）。</summary>
     public int Width { get; init; } = 640;
 
-    /// <summary>网络输入高（必须是 32 的倍数）。</summary>
+    /// <summary>网络输入高（必须是 <see cref="SizeStride"/> 的倍数）。</summary>
     public int Height { get; init; } = 640;
+
+    /// <summary>
+    /// 输入边长必须整除的步长。YOLO 的 P3/P4/P5 三档下采样要求 32；
+    /// DETR 系没有 32 这一档，只要 14（主干 patch）与 16（参考网格）的公倍数 112
+    /// —— 用 32 校验会把 336 / 560 这类合法尺寸挡在预处理层，训练直接失败。
+    /// </summary>
+    public int SizeStride { get; init; } = 32;
 
     /// <summary>letterbox 填充灰度值（ultralytics 默认 114）。</summary>
     public byte PadValue { get; init; } = 114;
@@ -72,12 +79,17 @@ public sealed record YoloPreprocessOptions
     /// <summary>校验并返回自身（非法值直接抛错，不做静默修正）。</summary>
     public YoloPreprocessOptions Validate()
     {
-        const int stride = 32;
+        int stride = SizeStride;
+
+        if (stride <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(SizeStride), stride, "步长必须是正整数。");
+        }
 
         if (Width <= 0 || Height <= 0 || Width % stride != 0 || Height % stride != 0)
         {
             throw new ArgumentException(
-                $"预处理尺寸必须是 {stride} 的正整数倍（P3/P4/P5 下采样），实际 {Width}x{Height}。",
+                $"预处理尺寸必须是 {stride} 的正整数倍，实际 {Width}x{Height}。",
                 nameof(Width));
         }
 

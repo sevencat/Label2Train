@@ -194,57 +194,58 @@ public static class DetrMatcher
             for (int group = 0; group < groups; group++)
             {
                 int start = group * groupSize;
-                int size = Math.Max(groupSize, valid.Count);
-                var cost = new double[size, size];
 
-                for (int local = 0; local < groupSize; local++)
+                // 匈牙利求解的是「GT 与 query 之间最小成本单射」。这里让 **GT 当行、query 当列**：
+                // 每张图通常只有 1~5 个 GT、却有 300 个 query，方阵写法要建 300×300 的成本矩阵
+                // 并跑 O(300³) ≈ 2700 万次内层循环（实测单步 0.5 s，占训练步的 16%）。
+                // 转置后是 3×300，同一个最优分配、成本矩阵小两个数量级。
+                int rows = valid.Count;
+                int columns = Math.Max(groupSize, rows);
+                var cost = new double[rows, columns];
+
+                for (int row = 0; row < rows; row++)
                 {
-                    int query = start + local;
+                    int target = valid[row];
+                    int offset = (image * maxTargets + target) * 4;
 
-                    var prediction = (
-                        allBoxes[(image * queries + query) * 4],
-                        allBoxes[(image * queries + query) * 4 + 1],
-                        allBoxes[(image * queries + query) * 4 + 2],
-                        allBoxes[(image * queries + query) * 4 + 3]);
+                    var truth = (
+                        allTargets[offset],
+                        allTargets[offset + 1],
+                        allTargets[offset + 2],
+                        allTargets[offset + 3]);
 
-                    for (int column = 0; column < valid.Count; column++)
+                    int classId = Math.Clamp((int)classValues[image * maxTargets + target], 0, classCount - 1);
+
+                    for (int local = 0; local < groupSize; local++)
                     {
-                        int target = valid[column];
-                        int offset = (image * maxTargets + target) * 4;
+                        int query = start + local;
 
-                        var truth = (
-                            allTargets[offset],
-                            allTargets[offset + 1],
-                            allTargets[offset + 2],
-                            allTargets[offset + 3]);
+                        var prediction = (
+                            allBoxes[(image * queries + query) * 4],
+                            allBoxes[(image * queries + query) * 4 + 1],
+                            allBoxes[(image * queries + query) * 4 + 2],
+                            allBoxes[(image * queries + query) * 4 + 3]);
 
-                        int classId = Math.Clamp((int)classValues[image * maxTargets + target], 0, classCount - 1);
                         float score = allScores[(image * queries + query) * classCount + classId];
 
-                        cost[local, column] =
+                        cost[row, local] =
                             -settings.ClassWeight * score
                             + settings.L1Weight * Distance(prediction, truth)
                             + settings.GiouWeight * (1.0 - Giou(prediction, truth));
                     }
 
-                    // 补齐列（GT 少于组内 query）用大成本，避免抢真实 GT。
-                    for (int column = valid.Count; column < size; column++)
-                        cost[local, column] = 1e6;
-                }
-
-                for (int row = groupSize; row < size; row++)
-                {
-                    for (int column = 0; column < size; column++)
-                        cost[row, column] = 1e6;
+                    // 组内 query 比 GT 还少时补的列：不可能被选中，给大成本（GT 多于 query 本就无解）
+                    for (int local = groupSize; local < columns; local++)
+                        cost[row, local] = 1e6;
                 }
 
                 int[] assignment = HungarianSolver.Solve(cost);
 
-                for (int local = 0; local < groupSize; local++)
+                for (int row = 0; row < rows; row++)
                 {
-                    int column = assignment[local];
-                    if (column >= 0 && column < valid.Count)
-                        pairs.Add((start + local, valid[column]));
+                    int column = assignment[row];
+                    if (column >= 0 && column < groupSize)
+                        pairs.Add((start + column, valid[row]));
                 }
             }
 

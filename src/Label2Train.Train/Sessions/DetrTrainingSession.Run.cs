@@ -59,6 +59,8 @@ public sealed partial class DetrTrainingSession
         int warmupSteps = Math.Min(batchesPerEpoch, totalSteps - 1);
         var schedule = new CosineSchedule(options.LearningRate, totalSteps, warmupSteps, options.LearningRate * 0.01f);
 
+        // 顺序由下面的 BuildEpochBatches 按 epoch 自己打乱：Trainer 的委托式 Fit 重载
+        // 不读 TrainerOptions.Shuffle，这里写 true 也不会生效，显式 false 免得误以为开着
         var trainer = new Trainer(
             model,
             optimizer,
@@ -66,15 +68,19 @@ public sealed partial class DetrTrainingSession
             new TrainerOptions { Epochs = options.Epochs, GradientClipNorm = 1f, Shuffle = false },
             new Rng(4));
 
+        // 预处理按 DETR 的步长校验（112 = patch 14 与参考网格 16 的公倍数）。
+        // 用 YOLO 缺省的 32 会拦掉 336 / 560 这些合法边长，训练在加载器构造时就失败
         using var trainLoader = new YoloSampleLoader(new YoloPreprocessOptions
         {
             Width = options.ImageSize,
             Height = options.ImageSize,
+            SizeStride = TrainingPresets.DetrImageSizeStride,
         });
         using var validationLoader = new YoloSampleLoader(new YoloPreprocessOptions
         {
             Width = options.ImageSize,
             Height = options.ImageSize,
+            SizeStride = TrainingPresets.DetrImageSizeStride,
         });
 
         var reports = new List<TrainProgress>(options.Epochs);
@@ -86,7 +92,7 @@ public sealed partial class DetrTrainingSession
         bool bestSaved = false;
 
         IReadOnlyList<EpochMetrics> history = trainer.Fit(
-            _ => BuildEpochBatches(),
+            BuildEpochBatches,
             schedule,
             metrics =>
             {
@@ -99,8 +105,14 @@ public sealed partial class DetrTrainingSession
                 reports.Add(item);
                 lastMap95 = map95;
 
-                log?.Invoke($"epoch {metrics.Epoch + 1}/{options.Epochs}  loss {metrics.Loss:F4}  "
-                    + $"mAP50 {map50:F3}  mAP50-95 {map95:F3}");
+                // 分项（加权）跟着每轮打一次：loss 卡在平台时，能立刻分清是分类项
+                // 压不下来（样本太少 / 类别不平衡）还是框回归没收敛（匹配或归一化问题）
+                (float classPart, float l1Part, float giouPart) = loss.AverageParts;
+                loss.ResetParts();
+
+                log?.Invoke($"epoch {metrics.Epoch + 1}/{options.Epochs}  loss {metrics.Loss:F4}"
+                    + $"  [cls {classPart:F3} / l1 {l1Part:F3} / giou {giouPart:F3}]"
+                    + $"  mAP50 {map50:F3}  mAP50-95 {map95:F3}");
 
                 progress?.Report(item);
 
@@ -129,16 +141,20 @@ public sealed partial class DetrTrainingSession
 
         return history;
 
-        IEnumerable<Batch> BuildEpochBatches()
+        IEnumerable<Batch> BuildEpochBatches(int epoch)
         {
             IReadOnlyList<YoloSample> samples = trainSet.Samples;
+
+            // 每轮换一次顺序：24 张图 + batch 4 只有 6 步，顺序固定的话每轮梯度方向几乎一样，
+            // 表现为 loss 上下震荡而 mAP 起不来（DETR 没有增强，顺序就是唯一的随机性）
+            int[] order = ShuffleSamples(samples.Count, new Rng((ulong)(0x51ED270B + epoch * 7919)));
 
             Batch? previous = null;
             try
             {
-                for (int start = 0; start < samples.Count; start += options.BatchSize)
+                for (int start = 0; start < order.Length; start += options.BatchSize)
                 {
-                    int count = Math.Min(options.BatchSize, samples.Count - start);
+                    int count = Math.Min(options.BatchSize, order.Length - start);
                     var images = new YoloImageSample[count];
 
                     // 一批图串行解码 + letterbox + 增强要几百毫秒，GPU 一步才 ~0.1 s，
@@ -147,7 +163,7 @@ public sealed partial class DetrTrainingSession
                         0,
                         count,
                         new ParallelOptions { MaxDegreeOfParallelism = Math.Min(count, 8) },
-                        offset => images[offset] = trainLoader.Load(samples[start + offset]));
+                        offset => images[offset] = trainLoader.Load(samples[order[start + offset]]));
 
                     YoloBatchResult packed = YoloBatchBuilder.Build(images);
 
@@ -171,5 +187,21 @@ public sealed partial class DetrTrainingSession
                 previous?.Dispose();
             }
         }
+    }
+
+    /// <summary>Fisher-Yates 打乱 <c>[0, count)</c>；与 <see cref="YoloTrainingSession"/> 同一套做法。</summary>
+    private static int[] ShuffleSamples(int count, Rng rng)
+    {
+        var order = new int[count];
+        for (int i = 0; i < count; i++)
+            order[i] = i;
+
+        for (int i = order.Length - 1; i > 0; i--)
+        {
+            int j = rng.NextInt(i + 1);
+            (order[i], order[j]) = (order[j], order[i]);
+        }
+
+        return order;
     }
 }

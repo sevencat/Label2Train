@@ -5,6 +5,7 @@ using Label2Train.App.ViewModels;
 using Label2Train.Core.Dataset.TinyLabel;
 using Label2Train.Core.Infrastructure;
 using Label2Train.Core.Storage;
+using Label2Train.Train.Data.Images;
 using Label2Train.Train.Export;
 using Label2Train.Train.Models.Yolo;
 using Label2Train.Train.Training;
@@ -134,6 +135,30 @@ public class TrainExportTests
     public void Nearest_Valid_Detr_ImageSize_Is_Used_As_Suggestion(int input, int expected)
     {
         Assert.Equal(expected, TrainingPresets.NearestValidDetrImageSize(input));
+    }
+
+    /// <summary>
+    /// 回归：336 是 112 的倍数（DETR 合法）却不是 32 的倍数（YOLO 合法），
+    /// 预处理层曾用 YOLO 的 32 校验，导致 DETR 训练在构造加载器时就崩（界面上填 352 → 纠正成 336 → 报错）。
+    /// </summary>
+    [Theory]
+    [InlineData(336)]
+    [InlineData(560)]
+    public void Detr_ImageSize_Passes_Preprocess_With_Detr_Stride(int size)
+    {
+        var options = new YoloPreprocessOptions
+        {
+            Width = size,
+            Height = size,
+            SizeStride = TrainingPresets.DetrImageSizeStride,
+        };
+
+        Assert.Same(options, options.Validate());
+        Assert.Throws<ArgumentException>(() => new YoloPreprocessOptions
+        {
+            Width = size,
+            Height = size,
+        }.Validate());
     }
 
     /// <summary>

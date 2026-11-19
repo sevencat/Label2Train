@@ -132,8 +132,10 @@ public sealed class DetrDatasetTrainingRunner(
             Epochs = options.Epochs,
             BatchSize = Math.Clamp(options.BatchSize, 1, MaxBatchSize),
             ImageSize = imageSize,
-            // 预训练权重微调用小学习率（官方 AdamW 1e-4 量级），从零训才敢用 1e-3
-            LearningRate = pretrained is null ? 1e-3f : 2e-4f,
+            // 预训练权重微调用官方 AdamW 的 1e-4，从零训才敢用 1e-3。
+            // 曾经用 2e-4：batch 被截到 4（有效批量远小于官方的 16），配上 2e-4 会让 loss
+            // 在小数据集上震荡回升（2.2 → 3.3 → 2.4 → 3.2），mAP 一直起不来
+            LearningRate = pretrained is null ? 1e-3f : 1e-4f,
             OutputDirectory = output,
             Device = DeviceFactory.Parse(options.Device),
             UseRfDetr = true,
