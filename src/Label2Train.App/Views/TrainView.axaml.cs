@@ -62,7 +62,8 @@ public partial class TrainView : UserControl
             viewModel.Epochs,
             viewModel.BatchSize,
             viewModel.ImageSize,
-            viewModel.Augment);
+            viewModel.Augment,
+            viewModel.Queries);
 
         if (await dialog.ShowDialog<TrainingTarget?>(owner) is not { } target)
         {
@@ -82,6 +83,7 @@ public partial class TrainView : UserControl
         viewModel.BatchSize = target.BatchSize;
         viewModel.ImageSize = target.ImageSize;
         viewModel.Augment = target.Augment;
+        viewModel.Queries = target.Queries;
 
         // 换项目 = 重新拉图片清单与标注，顺手记住这个项目
         if (projectChanged)
@@ -96,6 +98,29 @@ public partial class TrainView : UserControl
         {
             viewModel.Report(Loc.Format("Train.ImageSizeAdjusted", target.ImageSize));
         }
+    }
+
+    /// <summary>
+    /// 「参数说明」：RF-DETR 这次训练实际用到的每个参数、当前值、作用与推荐范围。
+    /// 只读 —— 参数本身在「训练目标设置」里改，这里给的是「为什么这么填」。
+    /// </summary>
+    private async void OnDetrHelp(object? sender, RoutedEventArgs e)
+    {
+        if (ViewModel is not { } viewModel || Owner is not { } owner)
+        {
+            return;
+        }
+
+        var dialog = new DetrParamsDialog(
+            viewModel.PretrainedWeights,
+            viewModel.HasPretrainedWeights,
+            (int)viewModel.Epochs,
+            (int)viewModel.BatchSize,
+            (int)viewModel.ImageSize,
+            (int)viewModel.Queries,
+            viewModel.Augment);
+
+        await dialog.ShowDialog(owner);
     }
 
     /// <summary>

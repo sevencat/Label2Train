@@ -52,6 +52,13 @@ public sealed record TrainingRunOptions(
     /// 默认开：它是「有 / 无增强」对照的开关，真实照片数据上开着更稳。
     /// </summary>
     public bool Augment { get; init; } = true;
+
+    /// <summary>
+    /// DETR 系的 query 数（YOLO 忽略）。一对一匹配下未匹配的 query 全是负样本，
+    /// 所以它要和「每图目标数」匹配：50 适合每图 1~30 个目标，目标更密再往上调。
+    /// 缺省 50 与 <c>DetrTrainingOptions.Queries</c> 一致。
+    /// </summary>
+    public int Queries { get; init; } = 50;
 }
 
 /// <summary>

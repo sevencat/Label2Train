@@ -16,13 +16,17 @@ public sealed record TrainingTarget(
     int ImageSize,
     string FamilyId,
     string ScaleId,
-    bool Augment = true);
+    bool Augment = true,
+    int Queries = TrainingPresets.DetrQueries);
 
 /// <summary>项目下拉的一行：<see cref="Display"/> 是给用户看的「名称 · #id」。</summary>
 public sealed record ProjectChoice(long Id, string Display, TinyLabelProjectSummary Project);
 
+/// <summary>queries 下拉的一行：数字 + 用在哪类数据上的说明。</summary>
+public sealed record QueryChoice(int Value, string Display);
+
 /// <summary>
-/// 训练目标设置：项目、模型家族、模型规模、epochs / batch / imgsz 一次配好。
+/// 训练目标设置：项目、模型家族、模型规模、epochs / batch / imgsz、增强与 queries 一次配好。
 /// 主界面只读展示这些值，避免训练中手滑改坏；入口只有一个「训练目标设置…」按钮。
 /// <para>
 /// 「缺省 YOLO / 缺省 RF-DETR」两个按钮一键回到推荐值：两者对 imgsz 的要求不一样
@@ -53,7 +57,8 @@ public partial class TrainingTargetDialog : Window
         decimal epochs,
         decimal batchSize,
         decimal imageSize,
-        bool augment = true)
+        bool augment = true,
+        decimal queries = TrainingPresets.DetrQueries)
     {
         InitializeComponent();
 
@@ -79,6 +84,12 @@ public partial class TrainingTargetDialog : Window
         ScaleBox.SelectedItem = scales.FirstOrDefault(scale => scale.Id == scaleId)
             ?? scales.FirstOrDefault();
 
+        QueriesBox.ItemsSource = QueryChoices();
+        QueriesBox.SelectedItem = QueriesBox.ItemsSource
+            .Cast<QueryChoice>()
+            .FirstOrDefault(choice => choice.Value == (int)queries)
+            ?? QueriesBox.ItemsSource.Cast<QueryChoice>().First();
+
         EpochsBox.Value = epochs;
         BatchBox.Value = batchSize;
         ImageSizeBox.Value = imageSize;
@@ -90,6 +101,22 @@ public partial class TrainingTargetDialog : Window
         UpdateScaleState();
         UpdateImageSizeHint();
     }
+
+    /// <summary>queries 的四个档位：50 默认、100 密集、150 很密、300 官方。</summary>
+    private static IReadOnlyList<QueryChoice> QueryChoices() =>
+    [
+        .. TrainingPresets.DetrQueryChoices.Select(value => new QueryChoice(
+            value,
+            Loc.Format("Train.QueriesChoice", value, Loc.Get(QueriesNoteKey(value))))),
+    ];
+
+    private static string QueriesNoteKey(int value) => value switch
+    {
+        <= 50 => "Train.QueriesNoteDefault",
+        <= 100 => "Train.QueriesNoteDense",
+        <= 150 => "Train.QueriesNoteVeryDense",
+        _ => "Train.QueriesNoteOfficial",
+    };
 
     private static Localizer Loc => Localizer.Instance;
 
@@ -104,12 +131,14 @@ public partial class TrainingTargetDialog : Window
 
     /// <summary>
     /// RF-DETR 的体量由 queries / 层数决定，规模下拉直接置灰；
-    /// 增强开关也只有 RF-DETR 认（YOLO 的 hflip / mosaic 在它自己的 pipeline 里）。
+    /// 增强开关与 queries 也只有 RF-DETR 认（YOLO 的 hflip / mosaic 在它自己的 pipeline 里，
+    /// 也没有 query 这个概念），选 YOLO 时整块隐藏。
     /// </summary>
     private void UpdateScaleState()
     {
         ScaleBox.IsEnabled = !IsDetr;
         AugmentBox.IsEnabled = IsDetr;
+        QueriesPanel.IsVisible = IsDetr;
     }
 
     private void OnPresetYolo(object? sender, RoutedEventArgs e) => ApplyPreset(TrainingPresets.Yolo);
@@ -181,7 +210,8 @@ public partial class TrainingTargetDialog : Window
             imageSize,
             (ModelBox.SelectedItem as ModelOption)?.Id ?? "v8",
             (ScaleBox.SelectedItem as ScaleOption)?.Id ?? "n",
-            AugmentBox.IsChecked ?? true));
+            AugmentBox.IsChecked ?? true,
+            (QueriesBox.SelectedItem as QueryChoice)?.Value ?? TrainingPresets.DetrQueries));
     }
 
     private void OnCancel(object? sender, RoutedEventArgs e) => Close(null);

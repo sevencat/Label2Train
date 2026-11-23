@@ -48,6 +48,9 @@
             <Button Content="{l:Loc Train.TargetSetup}" Padding="10,2" FontSize="13"
                     Click="OnSetupTarget" ToolTip.Tip="{l:Loc Train.TargetSetupTip}"
                     IsEnabled="{Binding !IsTraining}" />
+            <Button Content="{l:Loc Train.DetrHelp}" Padding="10,2" FontSize="13"
+                    Click="OnDetrHelp" ToolTip.Tip="{l:Loc Train.DetrHelpTip}"
+                    IsVisible="{Binding IsDetrFamily}" />
 
             <Border Width="1" Height="20" Background="{DynamicResource PanelBorderBrush}" Margin="2,0" />
 
@@ -78,6 +81,10 @@
             <TextBlock Text="aug" Classes="caption" Margin="10,0,0,0" IsVisible="{Binding ShowAugment}" />
             <TextBlock Text="{Binding AugmentText}" Classes="value" MinWidth="14"
                        IsVisible="{Binding ShowAugment}" />
+            <TextBlock Text="queries" Classes="caption" Margin="10,0,0,0"
+                       IsVisible="{Binding ShowQueries}" ToolTip.Tip="{l:Loc Train.QueriesHint}" />
+            <TextBlock Text="{Binding QueriesText}" Classes="value" MinWidth="24"
+                       IsVisible="{Binding ShowQueries}" ToolTip.Tip="{l:Loc Train.QueriesHint}" />
           </StackPanel>
         </Grid>
 

@@ -97,6 +97,24 @@
                  TextWrapping="Wrap" Margin="26,0,0,0" />
     </StackPanel>
 
+    <!-- queries 只对 RF-DETR 生效：一对一匹配下未匹配的 query 全是负样本，
+         要和「每图目标数」匹配；YOLO 没有 query 这个概念，整块隐藏 -->
+    <StackPanel x:Name="QueriesPanel" Spacing="4">
+      <StackPanel Orientation="Horizontal" Spacing="8">
+        <TextBlock Text="queries" Width="70" FontSize="13" VerticalAlignment="Center" />
+        <ComboBox x:Name="QueriesBox" Height="30" Width="220"
+                  ToolTip.Tip="{l:Loc Train.QueriesHint}">
+          <ComboBox.ItemTemplate>
+            <DataTemplate x:DataType="local:QueryChoice">
+              <TextBlock Text="{Binding Display}" />
+            </DataTemplate>
+          </ComboBox.ItemTemplate>
+        </ComboBox>
+      </StackPanel>
+      <TextBlock Text="{l:Loc Train.QueriesHint}" FontSize="12" Opacity="0.6"
+                 TextWrapping="Wrap" Margin="78,0,0,0" />
+    </StackPanel>
+
     <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
       <Button Content="{l:Loc Train.Cancel}" Click="OnCancel" MinWidth="76" />
       <Button Content="{l:Loc Train.Ok}" Click="OnOk" MinWidth="76" IsDefault="True" />

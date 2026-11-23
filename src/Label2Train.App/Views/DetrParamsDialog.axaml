@@ -1,0 +1,76 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:l="using:Label2Train.App.Localization"
+        xmlns:local="using:Label2Train.App.Views"
+        x:Class="Label2Train.App.Views.DetrParamsDialog"
+        Title="{l:Loc Train.DetrHelpTitle}"
+        Width="760" Height="660" MinWidth="620" MinHeight="420"
+        CanResize="True"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner">
+
+  <Grid RowDefinitions="Auto,*,Auto" Margin="20,18,20,14" RowSpacing="12">
+
+    <StackPanel Grid.Row="0" Spacing="6">
+      <TextBlock Text="{l:Loc Train.DetrHelpTitle}" FontSize="16" FontWeight="SemiBold" />
+      <TextBlock Text="{l:Loc Train.DetrHelpIntro}" FontSize="12" Opacity="0.6" TextWrapping="Wrap" />
+    </StackPanel>
+
+    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+      <StackPanel Spacing="10">
+
+        <!-- 表头 -->
+        <Grid ColumnDefinitions="130,170,*" ColumnSpacing="10">
+          <TextBlock Grid.Column="0" Text="{l:Loc Train.DetrHelpParam}" FontSize="12" Opacity="0.55" />
+          <TextBlock Grid.Column="1" Text="{l:Loc Train.DetrHelpValue}" FontSize="12" Opacity="0.55" />
+          <TextBlock Grid.Column="2" Text="{l:Loc Train.DetrHelpImpact}" FontSize="12" Opacity="0.55" />
+        </Grid>
+
+        <!-- 每个参数一行：名称 / 当前值 / 作用与推荐 -->
+        <ItemsControl x:Name="RowList">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="local:DetrParamRow">
+              <Border BorderThickness="0,0,0,1" BorderBrush="{DynamicResource PanelBorderBrush}"
+                      Padding="0,7">
+                <Grid ColumnDefinitions="130,170,*" ColumnSpacing="10">
+                  <TextBlock Grid.Column="0" Text="{Binding Name}" FontSize="13" FontWeight="SemiBold"
+                             TextWrapping="Wrap" VerticalAlignment="Top" />
+                  <TextBlock Grid.Column="1" Text="{Binding Value}" FontSize="13" Opacity="0.85"
+                             TextWrapping="Wrap" VerticalAlignment="Top" />
+                  <TextBlock Grid.Column="2" Text="{Binding Impact}" FontSize="13" Opacity="0.75"
+                             TextWrapping="Wrap" VerticalAlignment="Top" />
+                </Grid>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <!-- queries 与每图目标数的换算：这张表的数字直接对应「设置里该选哪一档」 -->
+        <Border Background="#0D000000" CornerRadius="6" Padding="12,10">
+          <StackPanel Spacing="6">
+            <TextBlock Text="{l:Loc Train.DetrHelpQueriesTitle}" FontSize="13" FontWeight="SemiBold" />
+            <TextBlock Text="{l:Loc Train.DetrHelpQueriesNote}" FontSize="12.5" Opacity="0.75"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+
+        <!-- 曲线判读：省掉「mAP 一直是 0 就是没学」这类误判 -->
+        <Border Background="#0D000000" CornerRadius="6" Padding="12,10">
+          <StackPanel Spacing="6">
+            <TextBlock Text="{l:Loc Train.DetrHelpReadingTitle}" FontSize="13" FontWeight="SemiBold" />
+            <TextBlock Text="{l:Loc Train.DetrHelpReadingNote}" FontSize="12.5" Opacity="0.75"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+        </Border>
+
+        <TextBlock Text="{l:Loc Train.DetrHelpFooter}" FontSize="12" Opacity="0.55" TextWrapping="Wrap" />
+      </StackPanel>
+    </ScrollViewer>
+
+    <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="{l:Loc Train.Close}" Click="OnClose" MinWidth="76" IsDefault="True"
+              IsCancel="True" />
+    </StackPanel>
+  </Grid>
+
+</Window>

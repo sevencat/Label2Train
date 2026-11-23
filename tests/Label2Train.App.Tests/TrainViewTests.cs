@@ -6,6 +6,8 @@ using Label2Train.App.ViewModels;
 using Label2Train.App.Views;
 using Label2Train.Core.Dataset.TinyLabel;
 using Label2Train.Core.Localization;
+using Label2Train.Core.Simulation;
+using Label2Train.Train.Training;
 using OxyPlot;
 using OxyPlot.Avalonia;
 using Xunit;
@@ -288,6 +290,127 @@ public class TrainViewTests
 
         train.ClearChart();
         RenderChart(train);
+    }
+
+    /// <summary>
+    /// queries 下拉只在 RF-DETR 下出现：50 默认、100 / 150 / 300 按每图目标数递进。
+    /// 选中的值必须一路带进 run options——断在这条链路上不会有任何报错，只会静悄悄用回 50。
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Queries_Dropdown_Flows_Into_Run_Options()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+        MainWindow window = host.CreateMainWindow();
+
+        TestUi.Show(window);
+        TestUi.SwitchToTraining(window);
+
+        TrainView view = TestUi.Train(window);
+        TrainViewModel train = host.ViewModel.Train;
+
+        Assert.Equal((decimal)TrainingPresets.DetrQueries, train.Queries);
+        Assert.False(train.ShowQueries);
+
+        train.SelectedModel = train.ModelFamilies.Single(model => model.Id == "rfdetr");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(train.ShowQueries);
+        Assert.Equal("50", train.QueriesText);
+        Assert.Contains(
+            view.GetVisualDescendants().OfType<TextBlock>(),
+            block => block.IsVisible && block.Text == "queries");
+
+        // 界面上改 → run options 里跟着变（runner 再把它落到 DetrTrainingOptions.Queries）
+        train.Queries = 150m;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal("150", train.QueriesText);
+
+        TrainingRunOptions options = train.BuildRunOptions(
+            "n",
+            new Progress<TrainingProgress>(),
+            new Progress<string>());
+
+        Assert.Equal(150, options.Queries);
+        Assert.Equal("rfdetr", options.Family);
+    }
+
+    /// <summary>对话框里的 queries 下拉：四个档位、默认选中当前值，YOLO 时整块隐藏。</summary>
+    [AvaloniaFact]
+    public void Queries_Combo_Is_Detr_Only_And_Keeps_Value()
+    {
+        var dialog = new TrainingTargetDialog(
+            [new TinyLabelProjectSummary(1, "demo", "", 10, 8, 2, DateTime.UnixEpoch, null, [])],
+            1,
+            [new ModelOption("v8", "YOLOv8"), new ModelOption("rfdetr", "RF-DETR")],
+            [new ScaleOption("n", "n · nano")],
+            "rfdetr",
+            "n",
+            100m,
+            2m,
+            224m,
+            augment: false,
+            queries: 100m);
+
+        ComboBox queriesBox = Assert.IsType<ComboBox>(dialog.FindControl<Control>("QueriesBox"));
+        StackPanel queriesPanel = Assert.IsType<StackPanel>(dialog.FindControl<Control>("QueriesPanel"));
+
+        Assert.Equal(TrainingPresets.DetrQueryChoices.Length, queriesBox.ItemCount);
+        Assert.Equal(100, Assert.IsType<QueryChoice>(queriesBox.SelectedItem).Value);
+
+        dialog.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        // 下拉本身要真的排出来（模板绑错时高度会是 0）
+        Assert.True(queriesBox.Bounds.Width > 0);
+
+        // RF-DETR 下可见，切回 YOLO 整块隐藏（YOLO 没有 query 这个概念）
+        Assert.True(queriesPanel.IsVisible);
+        dialog.FindControl<ComboBox>("ModelBox")!.SelectedIndex = 0;
+        Dispatcher.UIThread.RunJobs();
+        Assert.False(queriesPanel.IsVisible);
+
+        dialog.Close();
+    }
+
+    /// <summary>
+    /// 「参数说明」窗口：一行一个参数，queries 行显示的是当前值，不是写死的示例值。
+    /// </summary>
+    [AvaloniaFact]
+    public void Detr_Params_Dialog_Lists_Current_Values()
+    {
+        var dialog = new DetrParamsDialog(
+            "rf-detr-medium.safetensors",
+            hasWeights: true,
+            epochs: 80,
+            batchSize: 2,
+            imageSize: 224,
+            queries: 100,
+            augment: false);
+
+        ItemsControl list = Assert.IsType<ItemsControl>(dialog.FindControl<Control>("RowList"));
+        List<DetrParamRow> rows = [.. list.ItemsSource!.Cast<DetrParamRow>()];
+
+        Assert.Contains(rows, row => row.Name == "queries" && row.Value == "100");
+        Assert.Contains(rows, row => row.Name == "epochs" && row.Value == "80");
+        Assert.Contains(rows, row => row.Name == "batch" && row.Value == "2");
+        Assert.Contains(rows, row => row.Name == "imgsz" && row.Value == "224");
+        Assert.Contains(
+            rows,
+            row => row.Value == Localizer.Instance.Get("Train.AugmentOff"));
+
+        // 每一行都要有「作用与推荐」，空白行等于没写
+        Assert.All(rows, row => Assert.False(string.IsNullOrWhiteSpace(row.Impact)));
+
+        // 真渲染一遍：模板绑错 / 列宽塌成 0 这类问题只有布局过后才暴露
+        dialog.Show();
+        Dispatcher.UIThread.RunJobs();
+
+        List<TextBlock> blocks = [.. list.GetVisualDescendants().OfType<TextBlock>()];
+        Assert.Equal(rows.Count * 3, blocks.Count);
+        Assert.All(blocks, block => Assert.True(block.Bounds.Height > 0, block.Text));
+
+        dialog.Close();
     }
 
     /// <summary>用 SVG 导出真跑一遍 <c>PlotModel.Render</c>：轴范围的哨兵值有问题这里就会抛。</summary>

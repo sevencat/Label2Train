@@ -126,6 +126,16 @@ public sealed class DetrDatasetTrainingRunner(
 
         Log(options, pretrained is null ? RfDetrWeightSource.Hint : $"rfdetr: 预训练权重 {pretrained}");
 
+        // query 数跟着界面下拉走：一对一匹配下一图最多能匹配上是 Queries 个正样本，
+        // 也比这多不出检测框——每图目标数超过它，召回天花板就被这个数字卡住
+        int queries = TrainingPresets.ResolveDetrQueries(options.Queries);
+
+        Log(
+            options,
+            queries == options.Queries
+                ? $"query : {queries}（每图最多 {queries} 个正样本 / 检测框，见 train.json）"
+                : $"query : {options.Queries} → {queries}（允许范围 1~300）");
+
         var detrOptions = new DetrTrainingOptions
         {
             DataYaml = dataYaml,
@@ -136,6 +146,7 @@ public sealed class DetrDatasetTrainingRunner(
             // 曾经用 2e-4：batch 被截到 4（有效批量远小于官方的 16），配上 2e-4 会让 loss
             // 在小数据集上震荡回升（2.2 → 3.3 → 2.4 → 3.2），mAP 一直起不来
             LearningRate = pretrained is null ? 1e-3f : 1e-4f,
+            Queries = queries,
             OutputDirectory = output,
             Device = DeviceFactory.Parse(options.Device),
             UseRfDetr = true,

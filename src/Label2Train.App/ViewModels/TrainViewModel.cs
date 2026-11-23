@@ -84,6 +84,13 @@ public partial class TrainViewModel : ObservableObject
     [ObservableProperty]
     private bool _augment = true;
 
+    /// <summary>
+    /// DETR 系的 query 数（只对 RF-DETR 生效）。一对一匹配下未匹配 query 全是负样本，
+    /// 所以它要和每图目标数匹配：50 适合每图 1~30 个，目标更密时才往 100 / 150 / 300 调。
+    /// </summary>
+    [ObservableProperty]
+    private decimal _queries = TrainingPresets.DetrQueries;
+
     /// <summary>训练成哪个家族：YOLOv8 / YOLOv11 / RF-DETR。</summary>
     public IReadOnlyList<ModelOption> ModelFamilies { get; } =
     [
@@ -180,7 +187,15 @@ public partial class TrainViewModel : ObservableObject
     /// <summary>只有 RF-DETR 显示增强这一格。</summary>
     public bool ShowAugment => IsDetrFamily;
 
+    /// <summary>主界面只读展示的 query 数（一对一匹配下一图最多这么多个正样本 / 检测框）。</summary>
+    public string QueriesText => ((int)Queries).ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>只有 RF-DETR 显示 queries 这一格。</summary>
+    public bool ShowQueries => IsDetrFamily;
+
     partial void OnAugmentChanged(bool value) => OnPropertyChanged(nameof(AugmentText));
+
+    partial void OnQueriesChanged(decimal value) => OnPropertyChanged(nameof(QueriesText));
 
     partial void OnEpochsChanged(decimal value)
     {
@@ -209,6 +224,7 @@ public partial class TrainViewModel : ObservableObject
         OnPropertyChanged(nameof(IsScaleEnabled));
         OnPropertyChanged(nameof(IsDetrFamily));
         OnPropertyChanged(nameof(ShowAugment));
+        OnPropertyChanged(nameof(ShowQueries));
         OnPropertyChanged(nameof(ModelKey));
         OnPropertyChanged(nameof(ModelNameText));
         OnPropertyChanged(nameof(ScaleText));
@@ -851,6 +867,29 @@ public partial class TrainViewModel : ObservableObject
         }
     }
 
+    /// <summary>
+    /// 把界面上的值打包成 runner 的入参。抽成方法是为了让「下拉里选的 queries、勾掉的增强
+    /// 真的进了训练」能被测试钉住：这条链路断掉不会报错，只会安静地用回默认值。
+    /// </summary>
+    public TrainingRunOptions BuildRunOptions(
+        string scale,
+        IProgress<TrainingProgress> progress,
+        IProgress<string> log) =>
+        new(
+            StorageLocation.Parse(OutputDirectory),
+            Epochs: (int)Epochs,
+            BatchSize: (int)BatchSize,
+            ImageSize: (int)ImageSize,
+            Scale: scale.Length > 0 ? scale : "n",
+            Family: SelectedModel?.Id ?? "v8")
+        {
+            Augment = Augment,
+            Queries = (int)Queries,
+            Progress = progress,
+            Log = message => log.Report(message),
+            Control = _control,
+        };
+
     public async Task StartTrainingAsync()
     {
         if (IsTraining || _store is null)
@@ -892,19 +931,7 @@ public partial class TrainViewModel : ObservableObject
         try
         {
             // 设备不在这里传：训练侧用 DeviceFactory.Default（启动时探测过，有 CUDA 就用 CUDA）
-            var options = new TrainingRunOptions(
-                StorageLocation.Parse(OutputDirectory),
-                Epochs: (int)Epochs,
-                BatchSize: (int)BatchSize,
-                ImageSize: (int)ImageSize,
-                Scale: scale.Length > 0 ? scale : "n",
-                Family: SelectedModel?.Id ?? "v8")
-            {
-                Augment = Augment,
-                Progress = progress,
-                Log = message => log.Report(message),
-                Control = _control,
-            };
+            TrainingRunOptions options = BuildRunOptions(scale, progress, log);
 
             TrainingRunSummary summary = await Task
                 .Run(() => _runner.TrainAsync(_store, options, _training.Token), _training.Token)

@@ -30,6 +30,24 @@ public static class TrainingPresets
         imageSize >= DetrImageSizeStride && imageSize % DetrImageSizeStride == 0;
 
     /// <summary>
+    /// RF-DETR 的 query 数缺省值。官方权重是 300 行（COCO 的量级），但那意味着
+    /// 「几百个 query 里只有几个正样本」，本机实测在每图 4~5 个目标的数据上比 50 慢一个量级。
+    /// </summary>
+    public const int DetrQueries = 50;
+
+    /// <summary>
+    /// 下拉里可选的 query 数。上限 300 = 官方权重的行数：再往上官方 query_feat 不够切，
+    /// 多出来的 query 只能是随机初始化，等于把「有预训练」这个前提废掉。
+    /// </summary>
+    public static readonly int[] DetrQueryChoices = [50, 100, 150, 300];
+
+    /// <summary>
+    /// query 数兜底：至少 1 个，最多 300 个（见 <see cref="DetrQueryChoices"/>）。
+    /// 界面只给合法档位，这里挡的是手改代码 / 旧配置。
+    /// </summary>
+    public static int ResolveDetrQueries(int queries) => Math.Clamp(queries, 1, 300);
+
+    /// <summary>
     /// RF-DETR 训练集的预处理 / 增强。之前训练集与验证集共用「只 letterbox」的参数，
     /// 几十张图几十轮就被完全记住，验证集先到顶——这是继续加轮数的天花板。
     /// <para>
