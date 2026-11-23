@@ -16,6 +16,65 @@ namespace Label2Train.Train.Sessions;
 /// <summary>训练辅助：模型装配与验证集评估。</summary>
 public sealed partial class DetrTrainingSession
 {
+    /// <summary>每图参与评估的最大框数（COCO 惯例）。</summary>
+    private const int EvaluationMaxDetections = 100;
+
+    /// <summary>
+    /// 随机初始化的头（分类头、query 汇总、参考点）想要的学习率：1e-3。
+    /// <para>
+    /// 官方权重只有主干 / 解码器 / 框头能用（类别数与组数都对不上），这几块必须学得快一点；
+    /// 但**不能直接乘固定倍数**：基础 lr 取 1e-3（从零训的档位）时再乘 10 就是 1e-2，
+    /// Adam 一步就能把 <c>query_embed</c>（N(0,1) 初始化）和参考点推到 sigmoid 的饱和端，
+    /// 之后梯度精确为 0、loss 冻在原地（实测两组不同初始化冻在同一个 10.238）。
+    /// </para>
+    /// </summary>
+    private const float HeadLearningRateCap = 1e-3f;
+
+    /// <summary>随机头最多放大的倍数（基础 lr 已经 ≤ 1e-4 时才用得上）。</summary>
+    internal const float HeadGradientScaleMax = 10f;
+
+    /// <summary>
+    /// 随机头的梯度放大倍数 = 把它推到 <see cref="HeadLearningRateCap"/> 需要多少倍，
+    /// 夹在 [1, <see cref="HeadGradientScaleMax"/>] 内：基础 lr 1e-4 → ×10，1e-3 → ×1（不再放大）。
+    /// </summary>
+    internal static float HeadGradientScale(float learningRate) =>
+        learningRate <= 0f
+            ? HeadGradientScaleMax
+            : Math.Clamp(HeadLearningRateCap / learningRate, 1f, HeadGradientScaleMax);
+
+    /// <summary>
+    /// 算 AP 时先按这个阈值过滤，与 YOLO 路径（0.001）保持一致。
+    /// 不能用 <see cref="DetrTrainingOptions.Confidence"/>（默认 0.05）：AP 依赖「按分数排序的全部预测」，
+    /// 先砍掉低分框会把还没训好的正确框一起砍掉，mAP 就永远是 0。
+    /// </summary>
+    private const float EvaluationConfidence = 0.001f;
+
+    /// <summary>一轮验证的 mAP 加诊断量；<see cref="Empty"/> 表示没有验证集。</summary>
+    /// <param name="BestIou">阈值过滤后的检测框里，每个 GT 同类别的最佳 IoU。</param>
+    /// <param name="AnyIou">不看分数、不看类别，300 个 query 里每个 GT 的最佳 IoU。</param>
+    private readonly record struct DetrEvaluation(
+        float Map50,
+        float Map50_95,
+        float DetectionsPerImage,
+        float TruthsPerImage,
+        float TopScore,
+        float BestIou,
+        float Iou50Ratio,
+        float AnyIou,
+        float AnyIou50Ratio)
+    {
+        public static DetrEvaluation Empty => default;
+    }
+
+    /// <summary>
+    /// 是不是「权重里拿不到、只能随机初始化」的参数：分类头和 query / 参考点汇总。
+    /// 这几块的键名与官方权重对不上（91 类、13 组），会被 <c>load_state_dict</c> 跳过。
+    /// </summary>
+    private static bool IsRandomHead(string name) =>
+        name.Contains("class_embed", StringComparison.Ordinal)
+        || name.Contains("query_embed", StringComparison.Ordinal)
+        || name.Contains("refpoint_embed", StringComparison.Ordinal);
+
     /// <summary>按参数装配 RF-DETR 或简化 DETR，并把实际结构一并返回（写进检查点元数据）。</summary>
     private static (Module<Tensor, Tensor> Model, DetrArchitecture Architecture) BuildModel(
         DetrTrainingOptions options, int classCount, Device device, Action<string>? log)
@@ -50,9 +109,12 @@ public sealed partial class DetrTrainingSession
             Depth: pretrained?.Depth ?? options.DinoDepth,
             Heads: pretrained?.Heads ?? options.DinoHeads);
 
-        // 层数与元数据保持一致，导出时才能按同样的结构重建
+        // 层数与元数据保持一致，导出时才能按同样的结构重建。
+        // query 数按用户设置：官方 query_feat 里的 300 行只是 COCO 的量级，
+        // 对几百张、每图 4~5 个目标的数据集负样本会多出十几倍，分类头收敛慢一个量级。
+        // 装载时按行切前 N 行（RfDetrPretrained.Prepare），不必被 300 绑住。
         var architecture = new DetrArchitecture(
-            pretrained?.Queries ?? options.Queries,
+            options.Queries,
             pretrained is null ? options.EncoderLayers : 0,
             pretrained?.DecoderLayers ?? options.DecoderLayers,
             options.ModelHeads,
@@ -111,8 +173,12 @@ public sealed partial class DetrTrainingSession
         return (detector, architecture);
     }
 
-    /// <summary>验证集上算 mAP：解码 → 与真值比对（与 CLI 的 DETR 评估口径一致）。</summary>
-    private static (float Map50, float Map50_95) EvaluateMap(
+    /// <summary>
+    /// 验证集上算 mAP：解码 → 与真值比对（与 CLI 的 DETR 评估口径一致）。
+    /// 同时统计 det / gt / top1 score / IoU：mAP 一直是 0 时，光看那个 0 分不清
+    /// 「模型还没学到」和「框的位置根本对不上」。
+    /// </summary>
+    private static DetrEvaluation EvaluateMap(
         Module<Tensor, Tensor> model,
         YoloDataset? validationSet,
         YoloSampleLoader validationLoader,
@@ -121,7 +187,7 @@ public sealed partial class DetrTrainingSession
         Device device)
     {
         if (validationSet is null || options.EvalEvery <= 0)
-            return (0f, 0f);
+            return DetrEvaluation.Empty;
 
         IEnumerable<YoloSample> samples = validationSet.Samples;
         if (options.EvaluationLimit > 0)
@@ -129,6 +195,14 @@ public sealed partial class DetrTrainingSession
 
         var predictions = new List<IReadOnlyList<YoloDetection>>();
         var groundTruths = new List<IReadOnlyList<YoloGroundTruth>>();
+
+        int detections = 0;
+        double topScoreSum = 0;
+        int truthCount = 0;
+        double bestIouSum = 0;
+        int iouAbove50 = 0;
+        double anyIouSum = 0;
+        int anyIouAbove50 = 0;
 
         model.eval();
 
@@ -145,12 +219,76 @@ public sealed partial class DetrTrainingSession
                         new long[] { 1, 3, options.ImageSize, options.ImageSize },
                         device);
 
-                    predictions.Add(DetrPostProcess.Decode(
-                        model.forward(input), options.ImageSize, options.ImageSize, classCount, options.Confidence)[0]);
+                    Tensor output = model.forward(input);
 
-                    groundTruths.Add(image.Boxes
+                    // 每图最多留 100 个框：COCO 的评估惯例，也是这一个批次里最多能匹配上的数量级；
+                    // 300 个 query 全留下只会让评估慢三倍，对 AP 没有帮助
+                    IReadOnlyList<YoloDetection> decoded = DetrPostProcess.Decode(
+                        output,
+                        options.ImageSize,
+                        options.ImageSize,
+                        classCount,
+                        EvaluationConfidence,
+                        maxDetections: EvaluationMaxDetections)[0];
+
+                    predictions.Add(decoded);
+
+                    // det/img 仍按「用户看到的阈值」统计：阈值过滤后一个框都不剩，
+                    // 说明模型还没产出可用结果，这个数比 AP 的 0 更直观
+                    detections += decoded.Count(detection => detection.Score >= options.Confidence);
+
+                    if (decoded.Count > 0)
+                        topScoreSum += decoded[0].Score;
+
+                    YoloGroundTruth[] imageTruths = image.Boxes
                         .Select(box => new YoloGroundTruth(box.ClassId, box.X1, box.Y1, box.X2, box.Y2))
-                        .ToArray());
+                        .ToArray();
+
+                    groundTruths.Add(imageTruths);
+                    truthCount += imageTruths.Length;
+
+                    float[] raw = TorchInterop.ToArray(output);
+
+                    foreach (YoloGroundTruth truth in imageTruths)
+                    {
+                        float best = 0f;
+
+                        foreach (YoloDetection detection in decoded)
+                        {
+                            if (detection.ClassId == truth.ClassId)
+                                best = MathF.Max(best, Iou(detection, truth));
+                        }
+
+                        bestIouSum += best;
+
+                        if (best >= 0.5f)
+                            iouAbove50++;
+
+                        // 全体 query（不看分数、不看类别）的最佳 IoU：分数塌缩与框回归失败
+                        // 在 iou 这一列上是同一个 0，分开看才知道该修损失还是修框
+                        float any = 0f;
+
+                        for (int query = 0; query < raw.Length / (4 + classCount); query++)
+                        {
+                            int offset = query * (4 + classCount);
+                            float halfWidth = raw[offset + 2] / 2f;
+                            float halfHeight = raw[offset + 3] / 2f;
+
+                            any = MathF.Max(
+                                any,
+                                Iou(
+                                    Math.Clamp(raw[offset] - halfWidth, 0f, 1f) * options.ImageSize,
+                                    Math.Clamp(raw[offset + 1] - halfHeight, 0f, 1f) * options.ImageSize,
+                                    Math.Clamp(raw[offset] + halfWidth, 0f, 1f) * options.ImageSize,
+                                    Math.Clamp(raw[offset + 1] + halfHeight, 0f, 1f) * options.ImageSize,
+                                    truth));
+                        }
+
+                        anyIouSum += any;
+
+                        if (any >= 0.5f)
+                            anyIouAbove50++;
+                    }
 
                     scope.Dispose();
                 }
@@ -160,10 +298,41 @@ public sealed partial class DetrTrainingSession
         model.train();
 
         if (predictions.Count == 0)
-            return (0f, 0f);
+            return DetrEvaluation.Empty;
 
         DetectionMetricsResult result = DetectionMetrics.Evaluate(predictions, groundTruths, classCount);
-        return (result.Map50, result.Map50_95);
+        float images = predictions.Count;
+
+        return new DetrEvaluation(
+            result.Map50,
+            result.Map50_95,
+            detections / images,
+            truthCount / images,
+            (float)(topScoreSum / images),
+            truthCount == 0 ? 0f : (float)(bestIouSum / truthCount),
+            truthCount == 0 ? 0f : (float)iouAbove50 / truthCount,
+            truthCount == 0 ? 0f : (float)(anyIouSum / truthCount),
+            truthCount == 0 ? 0f : (float)anyIouAbove50 / truthCount);
+    }
+
+    /// <summary>GT 与检测框的 IoU（同类别才比，调用方已过滤）。</summary>
+    private static float Iou(YoloDetection detection, YoloGroundTruth truth) =>
+        Iou(detection.X1, detection.Y1, detection.X2, detection.Y2, truth);
+
+    /// <summary>像素 xyxy 与 GT 的 IoU。</summary>
+    private static float Iou(float x1, float y1, float x2, float y2, YoloGroundTruth truth)
+    {
+        float width = MathF.Min(x2, truth.X2) - MathF.Max(x1, truth.X1);
+        float height = MathF.Min(y2, truth.Y2) - MathF.Max(y1, truth.Y1);
+
+        if (width <= 0f || height <= 0f)
+            return 0f;
+
+        float intersection = width * height;
+        float union = (x2 - x1) * (y2 - y1)
+            + (truth.X2 - truth.X1) * (truth.Y2 - truth.Y1) - intersection;
+
+        return union <= 0f ? 0f : intersection / union;
     }
 
     /// <summary>检查点元数据：与 CLI 的 detr 检查点同名字段，导出器可直接复用。</summary>

@@ -117,4 +117,63 @@ public sealed class RfDetrPretrainedTests
 
         Assert.True(output.isfinite().all().item<bool>(), "前向输出里有 NaN / Inf");
     }
+
+    /// <summary>
+    /// query 数按用户设置（不跟随官方的 300）：query_feat 里存的 300 行按行切前 N 行装载，
+    /// 而不是整层被跳过、退回随机初始化。
+    /// </summary>
+    [Fact]
+    public void Fewer_Queries_Still_Take_Pretrained_Query_Embeddings()
+    {
+        string? path = WeightsPath;
+
+        if (path is null)
+        {
+            return;
+        }
+
+        RfDetrWeightsInfo info = RfDetrWeightsProbe.Inspect(path)!;
+        Device device = torch.CPU;
+
+        var dinoConfig = new DinoV2Config(
+            ImageSize: info.ImageSize,
+            PatchSize: info.PatchSize,
+            EmbeddingSize: info.EmbeddingSize,
+            Depth: info.Depth,
+            Heads: info.Heads);
+
+        const int queries = 50;
+        const int classCount = 2;
+
+        using var detector = new RfDetrDetector(
+            classCount,
+            queries,
+            dinoConfig,
+            8,
+            device,
+            encoderLayers: 0,
+            decoderLayers: info.DecoderLayers,
+            ffnSize: 2048,
+            points: info.DeformPoints,
+            levels: info.DeformLevels,
+            decoderHeads: info.DecoderHeads,
+            useRefPointHead: true,
+            useC2fProjector: true);
+
+        RfDetrPretrainedReport report = RfDetrPretrained.Apply(detector, path, device, info);
+
+        Assert.DoesNotContain("query_embed", report.Untouched);
+        Assert.DoesNotContain("refpoint_embed", report.Untouched);
+
+        // 分类头是按类别数随机的，绝不能因为 source[0] > target[0] 被按行截断
+        Assert.Contains("class_embed.weight", report.Untouched);
+
+        detector.eval();
+
+        using Tensor input = torch.zeros(1, 3, 224, 224, device: device);
+        using Tensor output = detector.forward(input);
+
+        Assert.Equal(queries, (int)output.shape[1]);
+        Assert.True(output.isfinite().all().item<bool>(), "前向输出里有 NaN / Inf");
+    }
 }

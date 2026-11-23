@@ -44,6 +44,10 @@ public partial class MainWindowViewModel : ObservableObject
     private readonly AppSettings _settings;
     private readonly SettingsStore _settingsStore;
     private readonly IDatabaseLocation _location;
+    private readonly LogBuffer _logBuffer;
+
+    /// <summary>日志窗口里保留的最大字符数；更早的行已经在 <see cref="LogBuffer"/> 之外，不必一直堆在界面上。</summary>
+    private const int MaxLogTextLength = 200_000;
 
     /// <summary>切项目时的代次：异步加载回来发现已经切走就丢弃结果。</summary>
     private int _loadVersion;
@@ -217,7 +221,9 @@ public partial class MainWindowViewModel : ObservableObject
 
         logger.LogInformation("主窗口已创建，数据目录：{Directory}", DataDirectory);
 
-        LogText = string.Join(Environment.NewLine, logBuffer.Snapshot().Select(entry => entry.ToString()));
+        _logBuffer = logBuffer;
+
+        RefreshLog();
     }
 
     partial void OnSelectedLanguageChanged(LanguageOption? value)
@@ -1058,7 +1064,33 @@ public partial class MainWindowViewModel : ObservableObject
     }
 
     private void AppendLog(string text)
-        => LogText = string.IsNullOrEmpty(LogText) ? text : $"{LogText}{Environment.NewLine}{text}";
+        => LogText = Cap(LogText.Length == 0 ? text : $"{LogText}{Environment.NewLine}{text}");
+
+    /// <summary>日志窗口打开时用：把缓冲里攒下的行整体铺一遍。</summary>
+    public void RefreshLog()
+        => LogText = Cap(string.Join(
+            Environment.NewLine,
+            _logBuffer.Snapshot().Select(entry => entry.ToString())));
+
+    /// <summary>日志窗口打开期间逐条追加；调用方负责切回 UI 线程。</summary>
+    public void AppendLog(LogEntry entry) => AppendLog(entry.ToString());
+
+    /// <summary>
+    /// 只留最近的一段：日志窗口是唯一无限增长的地方，截断比让字符串越拼越慢要好。
+    /// 尽量从行首切，免得界面第一行是半截。
+    /// </summary>
+    private static string Cap(string text)
+    {
+        if (text.Length <= MaxLogTextLength)
+        {
+            return text;
+        }
+
+        int start = text.Length - MaxLogTextLength;
+        int newline = text.IndexOf(Environment.NewLine, start, StringComparison.Ordinal);
+
+        return newline < 0 ? text[start..] : text[(newline + Environment.NewLine.Length)..];
+    }
 
     /// <summary>日志窗口的「清空」。</summary>
     public void ClearLog() => LogText = string.Empty;

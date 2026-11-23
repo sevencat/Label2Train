@@ -75,6 +75,9 @@
             <TextBlock Text="{Binding BatchSizeText}" Classes="value" MinWidth="20" />
             <TextBlock Text="imgsz" Classes="caption" Margin="10,0,0,0" />
             <TextBlock Text="{Binding ImageSizeText}" Classes="value" MinWidth="30" />
+            <TextBlock Text="aug" Classes="caption" Margin="10,0,0,0" IsVisible="{Binding ShowAugment}" />
+            <TextBlock Text="{Binding AugmentText}" Classes="value" MinWidth="14"
+                       IsVisible="{Binding ShowAugment}" />
           </StackPanel>
         </Grid>
 
@@ -110,6 +113,23 @@
             <TextBlock Text="{l:Loc Train.Scale}" Classes="caption" VerticalAlignment="Center"
                        Margin="6,0,0,0" ToolTip.Tip="{l:Loc Train.ScaleTip}" />
             <TextBlock Text="{Binding ScaleText}" Classes="value" />
+
+            <!-- RF-DETR 用官方权重热启动：文件名直接显示，完整路径与「放哪儿」进 ToolTip；
+                 找不到时用告警色明说「随机初始化」，不留空白 -->
+            <StackPanel Orientation="Horizontal" Spacing="6" VerticalAlignment="Center"
+                        Margin="10,0,0,0" IsVisible="{Binding IsDetrFamily}">
+              <TextBlock Text="{l:Loc Train.Pretrained}" Classes="caption"
+                         ToolTip.Tip="{Binding PretrainedWeightsTip}" />
+              <TextBlock Text="{Binding PretrainedWeights}" Classes="value" Opacity="0.8"
+                         MaxWidth="180" TextTrimming="CharacterEllipsis"
+                         IsVisible="{Binding HasPretrainedWeights}"
+                         ToolTip.Tip="{Binding PretrainedWeightsTip}" />
+              <TextBlock Text="{Binding PretrainedWeights}" FontSize="13" Foreground="#B45309"
+                         VerticalAlignment="Center" MaxWidth="180" TextTrimming="CharacterEllipsis"
+                         IsVisible="{Binding ShowPretrainedWeightsMissing}"
+                         ToolTip.Tip="{Binding PretrainedWeightsTip}" />
+            </StackPanel>
+
             <Button Content="{l:Loc Train.ExportOnnx}" Padding="10,2" FontSize="13" Click="OnExportOnnx"
                     ToolTip.Tip="{l:Loc Train.ExportOnnxTip}" />
             <Button Content="{l:Loc Train.ExportWeights}" Padding="10,2" FontSize="13" Click="OnExportWeights"

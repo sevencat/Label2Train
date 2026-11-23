@@ -19,8 +19,9 @@ public sealed record DetrLossOptions
     /// <summary>
     /// focal loss 的 γ（&gt;0 时启用；0 表示普通 BCE）。
     /// <para>
-    /// 实测：30 epoch 的合成数据上 focal（α=0.25、γ=2）mAP 0.002，普通 BCE 为 0.091，
-    /// 因此**默认关闭**；focal 作为长跑 / 类别不平衡时的可选项保留。
+    /// 默认关闭。8 张图、400 步的同口径对比里 γ=2 略好（mAP50 0.098 对 0.082，
+    /// top1 0.30 对 0.19），但差距在噪声范围，因此保持官方以外最保守的选择；
+    /// 类别极不平衡、负样本压不下去时可以试着打开。
     /// </para>
     /// </summary>
     public float FocalGamma { get; init; }
@@ -29,10 +30,17 @@ public sealed record DetrLossOptions
     public float FocalAlpha { get; init; } = 0.25f;
 
     /// <summary>
-    /// IA-BCE 的 γ（&gt;0 时分类目标 = <c>IoU^γ</c> 而不是 1）。
-    /// 这是官方 RF-DETR / LW-DETR 的 IoU-Aware BCE：让分类分数与定位质量对齐。
+    /// 启用官方的 IA-BCE（IoU-aware BCE，RF-DETR / LW-DETR 的默认分类损失）。
+    /// <para>
+    /// 官方实现（<c>criterion.py::_batched_detection_loss_tensors</c>）不是把标签换成软目标的
+    /// 普通 BCE，而是 focal-BCE 的权重改造：
+    /// <c>neg_w = p²</c>、<c>pos_w = clamp(p^α · IoU^(1-α), 0.01)</c>，
+    /// <c>loss = Σ (neg_w·x − logσ(x)·(pos_w + neg_w)) / num_boxes</c>。
+    /// 正样本权重里带当前概率和 IoU，等于让「框得准 + 已经有点把握」的 query 承担更多梯度，
+    /// 未匹配 query 的分数增长被 <c>p²</c> 抑制。
+    /// </para>
     /// </summary>
-    public float IouAwareClassGamma { get; init; }
+    public bool IouAwareBce { get; init; }
 }
 
 /// <summary>匈牙利算法（e-maxx 版，O(n³)）：<c>cost[i,j]</c> 为第 i 行匹配第 j 列的成本。</summary>

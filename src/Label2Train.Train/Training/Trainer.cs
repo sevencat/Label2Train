@@ -27,6 +27,12 @@ public sealed record TrainerOptions
 
     /// <summary>起始优化步（断点续训用；影响学习率调度的绝对位置）。</summary>
     public int StartStep { get; init; }
+
+    /// <summary>
+    /// 按参数名给出梯度倍率（用于给随机初始化的部分单独提高学习率）；null 表示全部 1。
+    /// 见 <see cref="Trainer"/> 里 <c>ScaleGradients</c> 的说明。
+    /// </summary>
+    public Func<string, float>? GradientScale { get; init; }
 }
 
 /// <summary>单个 epoch 结束时的指标。</summary>
@@ -62,6 +68,12 @@ public sealed class Trainer
     private readonly Rng _rng;
     private readonly Ema? _ema;
 
+    /// <summary>
+    /// 需要放大/缩小梯度的参数（<see cref="TrainerOptions.GradientScale"/> 的落地形式）。
+    /// 构造时抓一次，避免每步遍历整张网络。
+    /// </summary>
+    private readonly (Parameter Parameter, float Scale)[] _gradientScales;
+
     public Trainer(
         Module<Tensor, Tensor> model,
         OptimizerHelper optimizer,
@@ -82,6 +94,15 @@ public sealed class Trainer
         _ema = ema;
         Step = _options.StartStep;
 
+        Func<string, float>? gradientScale = _options.GradientScale;
+
+        _gradientScales = gradientScale is null
+            ? Array.Empty<(Parameter, float)>()
+            : _model.named_parameters()
+                .Select(entry => (Parameter: entry.parameter, Scale: gradientScale(entry.name)))
+                .Where(entry => entry.Scale != 1f)
+                .ToArray();
+
         if (_options.Epochs <= 0)
             throw new ArgumentOutOfRangeException(nameof(options), _options.Epochs, "Epochs 必须大于 0");
     }
@@ -97,6 +118,23 @@ public sealed class Trainer
 
     /// <summary>最近一个 epoch 里「前向 + 损失 + 反向 + 优化器」花掉的秒数。</summary>
     public double LastComputeSeconds { get; private set; }
+
+    /// <summary>最近一个 epoch 实际跑了多少个优化步；除以它才是每步耗时。</summary>
+    public int LastBatchCount { get; private set; }
+
+    /// <summary>
+    /// 最近一个 epoch 里每步梯度全局范数的平均值（裁剪前）。
+    /// <para>
+    /// 恒为 0 是「模型已经学不动了」的硬证据：参数被推到 sigmoid 的饱和端之后
+    /// 梯度精确为 0，loss 会一直停在原处，靠降低 lr 也救不回来，只能停训换配置。
+    /// 比「loss 几轮没变」更准——冻结时 loss 仍会有百分之几的抖动。
+    /// </para>
+    /// </summary>
+    public double LastGradientNorm { get; private set; }
+
+    private double _epochGradNormSum;
+
+    private int _epochGradSteps;
 
     /// <summary>
     /// 训练多个 epoch，返回每个 epoch 的指标。
@@ -219,6 +257,12 @@ public sealed class Trainer
             {
                 LastDataSeconds = dataSeconds;
                 LastComputeSeconds = computeSeconds;
+                LastBatchCount = batchCount;
+
+                // 梯度范数是「模型还在不在学」的唯一硬指标，每轮记一次平均值
+                LastGradientNorm = _epochGradSteps > 0 ? _epochGradNormSum / _epochGradSteps : 0;
+                _epochGradNormSum = 0;
+                _epochGradSteps = 0;
             }
 
             if (batchCount == 0)
@@ -286,7 +330,9 @@ public sealed class Trainer
         Tensor loss = ComputeLoss(prediction, batch.Target);
         loss.backward();
 
-        ClipGradients();
+        _epochGradNormSum += ClipGradients();
+        _epochGradSteps++;
+        ScaleGradients();
 
         if (schedule is not null)
             SetLearningRate(schedule.GetLearningRate(Step));
@@ -298,11 +344,9 @@ public sealed class Trainer
         return loss.detach().item<float>();
     }
 
-    private void ClipGradients()
+    /// <summary>裁剪梯度，返回裁剪前的全局范数（关掉裁剪时也会算，用于诊断模型是否已经学不动）。</summary>
+    private double ClipGradients()
     {
-        if (_options.GradientClipNorm <= 0f)
-            return;
-
         // 平方和在设备上累加，最后只同步一次。
         // 逐参数 item<T>() 会让每个参数都触发一次 GPU→CPU 同步（YOLOv8n 有上百个参数张量），
         // 等于每个 step 上百次「等 GPU 跑完再继续」，这是 GPU 训练最典型的自我拖慢。
@@ -317,7 +361,7 @@ public sealed class Trainer
         }
 
         if (sum is null)
-            return;
+            return 0;
 
         double norm;
         using (sum)
@@ -325,18 +369,32 @@ public sealed class Trainer
             norm = Math.Sqrt(sum.item<float>());
         }
 
-        if (norm <= _options.GradientClipNorm || norm <= 0)
-            return;
+        if (_options.GradientClipNorm <= 0f || norm <= _options.GradientClipNorm || norm <= 0)
+            return norm;
 
         var scale = (float)(_options.GradientClipNorm / norm);
         foreach (Parameter parameter in _model.parameters())
             parameter.grad?.mul_(scale);
+
+        return norm;
     }
 
     private void SetLearningRate(float learningRate)
     {
         foreach (ParamGroup group in _optimizer.ParamGroups)
             group.LearningRate = learningRate;
+    }
+
+    /// <summary>
+    /// 按 <see cref="TrainerOptions.GradientScale"/> 放大/缩小指定参数的梯度。
+    /// Adam 的更新量 ≈ lr·g/|g|，梯度乘以 k 等价于学习率乘以 k，
+    /// 因此可以用来给「随机初始化的头」单独提高学习率。
+    /// 放在梯度裁剪之后：免得放大的头梯度把预训练部分的裁剪阈值一起拉低。
+    /// </summary>
+    private void ScaleGradients()
+    {
+        foreach ((Parameter parameter, float scale) in _gradientScales)
+            parameter.grad?.mul_(scale);
     }
 
     private float GetLearningRate() => (float)_optimizer.ParamGroups.First().LearningRate;

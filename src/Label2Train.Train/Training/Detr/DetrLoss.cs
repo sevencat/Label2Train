@@ -207,6 +207,10 @@ public sealed class DetrLoss : ILoss
         LastMatchedPairs = matches.Sum(match => match.Pairs.Count);
 
         var targetScores = new float[batch * queries * _classCount];
+
+        // 正样本在 [B,Q,nc] 里的扁平位置 + 与 GT 的 IoU：IA-BCE 的正样本权重同时用这两者
+        var positiveIndices = new List<long>();
+        var positiveIous = new List<float>();
         var predictionIndex = new List<long>();
         var targetIndex = new List<long>();
         float[] classes = TorchInterop.ToArray(classIds.to(ScalarType.Float32));
@@ -220,17 +224,14 @@ public sealed class DetrLoss : ILoss
             {
                 int classId = Math.Clamp((int)classes[image * maxTargets + targetId], 0, _classCount - 1);
 
-                float targetValue = 1f;
-                if (_options.IouAwareClassGamma > 0f)
-                {
-                    float iou = IntersectionOverUnion(
-                        predictedBoxesFlat, (int)((image * queries + query) * 4),
-                        targetBoxesFlat, (int)((image * maxTargets + targetId) * 4));
+                float iou = IntersectionOverUnion(
+                    predictedBoxesFlat, (int)((image * queries + query) * 4),
+                    targetBoxesFlat, (int)((image * maxTargets + targetId) * 4));
 
-                    targetValue = MathF.Pow(Math.Clamp(iou, 0f, 1f), _options.IouAwareClassGamma);
-                }
+                targetScores[((image * queries + query) * _classCount) + classId] = 1f;
 
-                targetScores[(image * queries + query) * _classCount + classId] = targetValue;
+                positiveIndices.Add(((image * queries) + query) * _classCount + classId);
+                positiveIous.Add(iou);
 
                 predictionIndex.Add(image * queries + query);
                 targetIndex.Add(image * maxTargets + targetId);
@@ -242,9 +243,9 @@ public sealed class DetrLoss : ILoss
             new long[] { batch, queries, _classCount },
             prediction.device);
 
-        // 分类项：focal loss（α、γ）比普通 BCE 更能把未匹配 query 压到 0，
-        // 避免 60 epoch 后「正样本 0.3、未匹配 0.1~0.2」的重叠分布。
-        Tensor classLoss = ClassificationLoss(logits, scoreTargets);
+        // 分类项：正负样本同权、除以正样本数（DETR 的 num_boxes 口径），详见 ClassificationLoss
+        Tensor classLoss = ClassificationLoss(
+            logits, scoreTargets, positiveIndices, positiveIous, predictionIndex.Count);
 
         Tensor boxLoss;
         Tensor giouLoss;
@@ -362,22 +363,91 @@ public sealed class DetrLoss : ILoss
         return baseLoss;
     }
 
-    /// <summary>分类项：γ &gt; 0 时用 focal loss，否则退回普通 BCE。</summary>
-    private Tensor ClassificationLoss(Tensor logits, Tensor targets)
+    /// <summary>
+    /// 分类项，**除以正样本数**归一化（DETR 的 <c>num_boxes</c> 口径）。
+    /// <para>
+    /// 归一化三种都试过，只有这一种能同时压住负样本、抬得起正样本：
+    /// <c>mean(全体元素)</c> 会被 300×nc 个负样本稀释（top1 0.51 → 0.06、mAP 恒 0）；
+    /// <c>正负各自求均值</c> 让负样本权重只有正样本的 1/200（未匹配 query 分数 0.97、mAP50 卡 0.10）。
+    /// </para>
+    /// <para>
+    /// <see cref="DetrLossOptions.IouAwareBce"/> 打开时用官方 RF-DETR 的 IA-BCE 公式
+    /// （<c>criterion.py::_batched_detection_loss_tensors</c>）：负样本权重 <c>p²</c>，
+    /// 正样本权重 <c>clamp(p^α · IoU^(1-α), 0.01)</c>，写成
+    /// <c>Σ(neg·x − logσ(x)·(pos+neg)) / num_boxes</c>。
+    /// 注意官方**不是**把标签换成 <c>IoU^γ</c> 的软标签 BCE——那样早期 IoU 很小时目标分被压到 0.0x，
+    /// 所有 query 的分数都会掉到评估阈值以下。
+    /// </para>
+    /// </summary>
+    /// <param name="logits">分类 logits <c>[B,Q,nc]</c>。</param>
+    /// <param name="targets">硬标签（匹配位置为 1，其余 0），仅非 IA-BCE 路径使用。</param>
+    /// <param name="positiveIndices">正样本在 <c>[B,Q,nc]</c> 里的扁平位置。</param>
+    /// <param name="positiveIous">与 <paramref name="positiveIndices"/> 一一对应的匹配 IoU。</param>
+    /// <param name="positiveCount">匹配对数量（归一化分母）。</param>
+    internal Tensor ClassificationLoss(
+        Tensor logits,
+        Tensor targets,
+        IReadOnlyList<long> positiveIndices,
+        IReadOnlyList<float> positiveIous,
+        int positiveCount)
     {
-        Tensor bce = torch.nn.functional.binary_cross_entropy_with_logits(
+        if (_options.IouAwareBce)
+        {
+            float alpha = _options.FocalAlpha;
+
+            Tensor flatLogits = logits.reshape(-1);
+            Tensor probability = flatLogits.sigmoid();
+            Tensor negative = probability.pow(2f);
+            Tensor positive = torch.zeros_like(flatLogits);
+
+            if (positiveIndices.Count > 0)
+            {
+                Tensor selection = torch.tensor(
+                    positiveIndices.ToArray(),
+                    new long[] { positiveIndices.Count },
+                    device: logits.device);
+
+                Tensor iou = torch.tensor(
+                    positiveIous.ToArray(),
+                    new long[] { positiveIous.Count },
+                    device: logits.device);
+
+                // 官方的正样本权重：当前概率与 IoU 的几何插值，clamp 到 0.01 防止梯度全灭
+                Tensor score = probability.index_select(0, selection)
+                    .pow(alpha)
+                    .mul(iou.pow(1f - alpha))
+                    .clamp(min: 0.01f)
+                    .detach();
+
+                positive.scatter_(0, selection, score);
+
+                using Tensor complement = 1f - score;
+                negative.scatter_(0, selection, complement);
+            }
+
+            // logσ(x) = -softplus(-x)，比 logsigmoid 在 TorchSharp 里更稳
+            Tensor logSigma = torch.nn.functional.softplus(-flatLogits).neg();
+            Tensor loss = (negative * flatLogits) - (logSigma * (positive + negative));
+
+            return loss.sum() / Math.Max(1, positiveCount);
+        }
+
+        Tensor elementwise = torch.nn.functional.binary_cross_entropy_with_logits(
             logits,
             targets,
             reduction: torch.nn.Reduction.None);
 
-        if (_options.FocalGamma <= 0f)
-            return bce.mean();
+        if (_options.FocalGamma > 0f)
+        {
+            // 普通 focal 的调制因子按元素算；归一化仍走 num_boxes 口径
+            Tensor probability = logits.sigmoid();
+            Tensor probabilityTrue = probability * targets + (1f - probability) * (1f - targets);
+            Tensor alphaTrue = _options.FocalAlpha * targets + (1f - _options.FocalAlpha) * (1f - targets);
 
-        Tensor probability = logits.sigmoid();
-        Tensor probabilityTrue = probability * targets + (1f - probability) * (1f - targets);
-        Tensor alphaTrue = _options.FocalAlpha * targets + (1f - _options.FocalAlpha) * (1f - targets);
+            elementwise = elementwise * alphaTrue * (1f - probabilityTrue).pow(_options.FocalGamma);
+        }
 
-        return (bce * alphaTrue * (1f - probabilityTrue).pow(_options.FocalGamma)).mean();
+        return elementwise.sum() / Math.Max(1, positiveCount);
     }
 
     /// <summary>两个归一化 cxcywh 框的 IoU（IA-BCE 的分类目标用）。</summary>

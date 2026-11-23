@@ -139,6 +139,7 @@ public sealed class DetrDatasetTrainingRunner(
             OutputDirectory = output,
             Device = DeviceFactory.Parse(options.Device),
             UseRfDetr = true,
+            Augment = options.Augment,
             DinoWeights = pretrained ?? string.Empty,
         };
 
@@ -165,7 +166,12 @@ public sealed class DetrDatasetTrainingRunner(
                     item.Map50_95));
             });
 
-        Task<IReadOnlyList<EpochMetrics>> training = session.StartAsync(detrOptions, progress, options.Log);
+        // 会话自己的每轮输出（epoch / loss 分项 / mAP / 耗时）也走 Log：
+        // 以前直接把 options.Log 交下去，那些行只进界面回调、不进 NLog，
+        // 「日志」窗口和 data/logs/label.log 里一行训练输出都没有
+        Action<string>? sessionLog = options.Log is null ? null : message => Log(options, message);
+
+        Task<IReadOnlyList<EpochMetrics>> training = session.StartAsync(detrOptions, progress, sessionLog);
 
         // 外部的暂停 / 继续转发给 DETR 会话：训练线程只在批次边界响应，转发是安全的
         using var bridgeCancellation = new CancellationTokenSource();

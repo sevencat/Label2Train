@@ -83,7 +83,27 @@ public static class RfDetrPretrained
                 continue;
             }
 
-            (float[] Values, long[] Shape)? prepared = Prepare(data, entry.Shape, want);
+            // 位置编码：官方权重按自己的输入边长（576 → 36×36 个 patch）存，用户换成别的
+            // imgsz 时 token 数对不上。这里按官方 DINOv2 的做法做双三次插值；不能像其他层那样
+            // 直接跳过——跳过会让 pos_embed 停在构造时的全 0，模型彻底失去位置信息，
+            // 表现为 loss 缓慢下降但 mAP 几十轮都是 0。
+            if (target == "backbone.pos_embed" && !entry.Shape.SequenceEqual(want))
+            {
+                Tensor? resized = ResizePositionEmbedding(current, data, entry.Shape, device);
+
+                if (resized is null)
+                {
+                    skipped++;
+
+                    continue;
+                }
+
+                mapped[target] = resized;
+
+                continue;
+            }
+
+            (float[] Values, long[] Shape)? prepared = Prepare(target, data, entry.Shape, want);
 
             if (prepared is null)
             {
@@ -126,20 +146,73 @@ public static class RfDetrPretrained
     }
 
     /// <summary>
+    /// 把官方的位置编码（<c>[1, 1 + h·w, D]</c>，第一个 token 是 cls）按双三次插值到目标尺寸。
+    /// 两边都必须是正方形 patch 网格；否则返回 <c>null</c>，交给调用方按「跳过」处理。
+    /// </summary>
+    private static Tensor? ResizePositionEmbedding(Tensor current, float[] data, long[] source, Device device)
+    {
+        long[] want = current.shape;
+
+        if (source.Length != 3 || want.Length != 3 || source[2] != want[2])
+            return null;
+
+        long sourcePatches = source[1] - 1;
+        long targetPatches = want[1] - 1;
+
+        if (sourcePatches <= 0 || targetPatches <= 0)
+            return null;
+
+        int sourceSide = (int)Math.Round(Math.Sqrt(sourcePatches));
+        int targetSide = (int)Math.Round(Math.Sqrt(targetPatches));
+
+        if ((long)sourceSide * sourceSide != sourcePatches
+            || (long)targetSide * targetSide != targetPatches)
+        {
+            return null;
+        }
+
+        using Tensor embeddings = TorchInterop.FromArray(data, source, device);
+
+        Tensor patches = embeddings
+            .narrow(1, 1, sourcePatches)
+            .view(1, sourceSide, sourceSide, want[2])
+            .permute(0, 3, 1, 2);
+
+        Tensor resized = torch.nn.functional.interpolate(
+            patches,
+            new long[] { targetSide, targetSide },
+            mode: InterpolationMode.Bicubic,
+            align_corners: false);
+
+        Tensor flat = resized.permute(0, 2, 3, 1).contiguous().view(1, targetPatches, want[2]);
+
+        return torch.cat(new[] { embeddings.narrow(1, 0, 1), flat }, 1);
+    }
+
+    /// <summary>
     /// 决定这条张量怎么用：形状一致就直接用；<c>query_embed</c> / <c>refpoint_embed</c>
-    /// 这类「官方存了全部 Group-DETR 组」的按行切前 <c>target[0]</c> 行。
+    /// 这类「官方存了全部 Group-DETR 组、且 query 数与用户设置无关」的按行切前 <c>target[0]</c> 行。
     /// 其他形状不一致的一律放弃。
     /// </summary>
-    private static (float[] Values, long[] Shape)? Prepare(float[] data, long[] source, long[] target)
+    /// <param name="target">模型侧参数名（只对 query / refpoint 允许按行切片）。</param>
+    /// <param name="data">检查点里的原始数据。</param>
+    /// <param name="source">检查点里的形状。</param>
+    /// <param name="target">模型侧形状。</param>
+    private static (float[] Values, long[] Shape)? Prepare(
+        string name, float[] data, long[] source, long[] target)
     {
         if (source.SequenceEqual(target))
         {
             return (data, target);
         }
 
-        // Group-DETR：组 0 排在最前，正好是前 target[0] 行
-        if (source.Length == 2 && target.Length == 2 && source[1] == target[1]
-            && target[0] > 0 && source[0] > target[0] && source[0] % target[0] == 0)
+        // 只对 query / refpoint 做按行切片：官方 query_feat 存的是 Group-DETR 的 n 组 × 300 行，
+        // 组 0 排在最前；用户把 Queries 调小（官方 300 → 我们 20/50/100）时同样取前若干行即可。
+        // 其他权重（尤其 class_embed 的 91 类）绝对不能按行截——类别语义会对不上。
+        bool sliceable = name is "query_embed" or "refpoint_embed";
+
+        if (sliceable && source.Length == 2 && target.Length == 2 && source[1] == target[1]
+            && target[0] > 0 && source[0] > target[0])
         {
             long count = target[0] * target[1];
 

@@ -185,10 +185,14 @@ public sealed class YoloDatasetTrainingRunner(
                     }
 
                     // 把一轮拆成「等数据 / 算梯度 / 评估」三段：GPU 慢还是数据管道慢，看这一行就够了。
+                    // 两个计时都是整轮累计，除一下步数才是每步耗时
+                    int steps = Math.Max(1, trainer.LastBatchCount);
+
                     Log(options,
                         $"epoch {completed}/{options.Epochs}  loss {metrics.Loss:F4}  "
                         + $"mAP50 {map50:F3}  mAP50-95 {map95:F3}  "
-                        + $"time data {trainer.LastDataSeconds:F1}s + step {trainer.LastComputeSeconds:F1}s "
+                        + $"time {trainer.LastComputeSeconds + trainer.LastDataSeconds:F1}s / {steps} step "
+                        + $"(data {trainer.LastDataSeconds / steps:F2}s + step {trainer.LastComputeSeconds / steps:F2}s) "
                         + (evaluate ? $"+ eval {evalSeconds:F1}s" : "+ eval skipped"));
 
                     options.Progress?.Report(new TrainingProgress(
@@ -549,8 +553,10 @@ public sealed class YoloDatasetTrainingRunner(
         return order;
     }
 
-    private static void Log(TrainingRunOptions options, string message)
+    /// <summary>训练输出既给界面回调，也进 NLog——「日志」窗口和 data/logs 才看得到每轮进度。</summary>
+    private void Log(TrainingRunOptions options, string message)
     {
         options.Log?.Invoke(message);
+        logger?.LogInformation("YOLO {Message}", message);
     }
 }

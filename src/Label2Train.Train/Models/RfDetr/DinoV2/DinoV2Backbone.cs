@@ -10,7 +10,8 @@ namespace Label2Train.Train.Models.RfDetr;
 /// <c>blocks.{i}</c> + <c>norm</c>，键名与 facebookresearch/dinov2 官方 <c>.pth</c> 一致。
 /// <para>
 /// 输出是完整 token 序列 <c>[B, 1 + H/p·W/p, D]</c>（含 cls token），供 RF-DETR 的多尺度投影使用。
-/// 位置编码目前按「前 N 个 token」直接截取（不做双三次插值），因此输入尺寸应尽量等于训练尺寸。
+/// 位置编码按官方做法对 patch 网格做双三次插值，因此输入尺寸只受 patch 步长约束（H、W 必须是
+/// <see cref="DinoV2Config.PatchSize"/> 的倍数），560 这类大于预训练 518 的输入也能直接跑。
 /// </para>
 /// </summary>
 public sealed class DinoV2Backbone : Module<Tensor, Tensor>
@@ -86,13 +87,6 @@ public sealed class DinoV2Backbone : Module<Tensor, Tensor>
         int height = (int)input.shape[2];
         int width = (int)input.shape[3];
         int tokens = TokenCount(height, width);
-
-        if (tokens > Config.TokenCount)
-        {
-            throw new ArgumentException(
-                $"输入 {height}x{width} 需要 {tokens} 个 token，超过位置编码上限 {Config.TokenCount}。",
-                nameof(input));
-        }
 
         long batch = input.shape[0];
 

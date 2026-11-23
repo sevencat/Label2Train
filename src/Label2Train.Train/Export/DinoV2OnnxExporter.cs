@@ -110,9 +110,6 @@ public static class DinoV2OnnxExporter
         int tokens = side * side + 1;
         int embedding = config.EmbeddingSize;
 
-        if (tokens > config.TokenCount)
-            throw new ArgumentException($"token 数 {tokens} 超过位置编码上限 {config.TokenCount}。", nameof(imageHeight));
-
         var context = new Context(builder, state);
 
         string patches = context.Next("patch_embed");

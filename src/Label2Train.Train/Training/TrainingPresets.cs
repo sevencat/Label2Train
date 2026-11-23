@@ -1,3 +1,5 @@
+using Label2Train.Train.Data.Images;
+
 namespace Label2Train.Train.Training;
 
 /// <summary>
@@ -26,6 +28,27 @@ public static class TrainingPresets
     /// <summary>一张 ONNX 图能不能建出来，就看边长是不是 112 的倍数。</summary>
     public static bool IsValidDetrImageSize(int imageSize) =>
         imageSize >= DetrImageSizeStride && imageSize % DetrImageSizeStride == 0;
+
+    /// <summary>
+    /// RF-DETR 训练集的预处理 / 增强。之前训练集与验证集共用「只 letterbox」的参数，
+    /// 几十张图几十轮就被完全记住，验证集先到顶——这是继续加轮数的天花板。
+    /// <para>
+    /// 这里按官方配方开 hflip 0.5、随机缩放 ±0.25、平移 ±0.1、HSV(0.015 / 0.7 / 0.4)，
+    /// 但**不开 mosaic**：官方 RF-DETR 配方里没有 mosaic，小数据集拼贴后目标常只剩半截。
+    /// </para>
+    /// </summary>
+    public static YoloPreprocessOptions DetrTrainPreprocess(int imageSize) => new()
+    {
+        Width = imageSize,
+        Height = imageSize,
+        SizeStride = DetrImageSizeStride,
+        HorizontalFlipProbability = 0.5f,
+        ScaleGain = 0.25f,
+        TranslateGain = 0.1f,
+        HueGain = 0.015f,
+        SaturationGain = 0.7f,
+        ValueGain = 0.4f,
+    };
 
     /// <summary>合法值原样返回，非法时就近纠正（训练入口兜底用，界面已经纠正过一次）。</summary>
     public static int ResolveDetrImageSize(int imageSize) =>

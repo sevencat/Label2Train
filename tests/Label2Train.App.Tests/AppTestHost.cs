@@ -3,6 +3,7 @@ using Label2Train.App.ViewModels;
 using Label2Train.App.Views;
 using Label2Train.Core.Dataset.TinyLabel;
 using Label2Train.Core.Infrastructure;
+using Label2Train.Core.Infrastructure.Logging;
 using Label2Train.Core.Localization;
 using Label2Train.Label;
 using Label2Train.Train.Export;
@@ -65,7 +66,8 @@ public sealed class AppTestHost : IAsyncDisposable
     }
 
     /// <summary>新建主窗口（会像线上一样在 Opened 里打开上次的工作区）。</summary>
-    public MainWindow CreateMainWindow() => new(ViewModel, Startup);
+    public MainWindow CreateMainWindow()
+        => new(ViewModel, Startup, _services.GetRequiredService<LogBuffer>());
 
     public async ValueTask DisposeAsync()
     {

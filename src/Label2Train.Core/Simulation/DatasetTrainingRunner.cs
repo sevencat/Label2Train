@@ -46,6 +46,12 @@ public sealed record TrainingRunOptions(
 
     /// <summary>每几轮在验证集上算一次 mAP（0 表示每轮都算；最后一轮总会算）。</summary>
     public int EvalEvery { get; init; } = 5;
+
+    /// <summary>
+    /// 训练集是否开数据增强。只对 RF-DETR 生效（YOLO 走自己的 pipeline）。
+    /// 默认开：它是「有 / 无增强」对照的开关，真实照片数据上开着更稳。
+    /// </summary>
+    public bool Augment { get; init; } = true;
 }
 
 /// <summary>

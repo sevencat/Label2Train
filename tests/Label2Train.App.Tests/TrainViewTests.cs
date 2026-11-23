@@ -1,5 +1,6 @@
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Threading;
 using Avalonia.VisualTree;
 using Label2Train.App.ViewModels;
 using Label2Train.App.Views;
@@ -124,12 +125,60 @@ public class TrainViewTests
         ComboBox projectBox = Assert.IsType<ComboBox>(dialog.FindControl<Control>("ProjectBox"));
         ComboBox modelBox = Assert.IsType<ComboBox>(dialog.FindControl<Control>("ModelBox"));
         ComboBox scaleBox = Assert.IsType<ComboBox>(dialog.FindControl<Control>("ScaleBox"));
+        CheckBox augmentBox = Assert.IsType<CheckBox>(dialog.FindControl<Control>("AugmentBox"));
 
         Assert.Equal(1, projectBox.ItemCount);
         Assert.True(scaleBox.IsEnabled);
 
+        // 增强开关只有 RF-DETR 认：YOLO 的 hflip / mosaic 在它自己的 pipeline 里
+        Assert.False(augmentBox.IsEnabled);
+
         modelBox.SelectedIndex = 1;
         Assert.False(scaleBox.IsEnabled);
+        Assert.True(augmentBox.IsEnabled);
+        Assert.True(augmentBox.IsChecked);
+    }
+
+    /// <summary>
+    /// 增上一轮实测里「同种子关增强更准」的结论要能让用户自己复现：开关落在训练目标设置里，
+    /// 值一路传到 run options；主界面只在 RF-DETR 下显示 aug 开 / 关。
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Augment_Toggle_Is_RfDetr_Only()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+        MainWindow window = host.CreateMainWindow();
+
+        TestUi.Show(window);
+        TestUi.SwitchToTraining(window);
+
+        TrainView view = TestUi.Train(window);
+        TrainViewModel train = host.ViewModel.Train;
+
+        Assert.False(train.ShowAugment);
+        Assert.DoesNotContain(
+            view.GetVisualDescendants().OfType<TextBlock>(),
+            block => block.Text == "aug" && block.IsVisible);
+
+        train.SelectedModel = train.ModelFamilies.Single(model => model.Id == "rfdetr");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(train.ShowAugment);
+        Assert.Equal(Localizer.Instance.Get("Train.AugmentOn"), train.AugmentText);
+
+        HashSet<string> texts = [.. view
+            .GetVisualDescendants()
+            .OfType<TextBlock>()
+            .Where(block => block.IsVisible)
+            .Select(block => block.Text ?? string.Empty)];
+
+        Assert.Contains("aug", texts);
+        Assert.Contains(Localizer.Instance.Get("Train.AugmentOn"), texts);
+
+        train.Augment = false;
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.Equal(Localizer.Instance.Get("Train.AugmentOff"), train.AugmentText);
     }
 
     /// <summary>
@@ -179,6 +228,44 @@ public class TrainViewTests
             .Single(item => item.Content as string == start);
 
         Assert.False(button.IsEnabled);
+    }
+
+    [AvaloniaFact]
+    public async Task Detr_Pretrained_Weights_Are_Shown()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+        MainWindow window = host.CreateMainWindow();
+
+        TestUi.Show(window);
+        TestUi.SwitchToTraining(window);
+
+        TrainView view = TestUi.Train(window);
+        TrainViewModel train = host.ViewModel.Train;
+
+        // YOLO 家族不用预训练权重，这一行不该出现
+        Assert.False(train.IsDetrFamily);
+        Assert.False(train.ShowPretrainedWeightsMissing);
+
+        train.SelectedModel = train.ModelFamilies.Single(model => model.Id == "rfdetr");
+        Dispatcher.UIThread.RunJobs();
+
+        Assert.True(train.IsDetrFamily);
+
+        // 找到权重显示文件名、路径进 ToolTip；没找到明说随机初始化——两种都不留空
+        Assert.False(string.IsNullOrWhiteSpace(train.PretrainedWeights));
+        Assert.Equal(
+            train.HasPretrainedWeights
+                ? Path.GetFileName(train.PretrainedWeightsPath)
+                : Localizer.Instance.Get("Train.PretrainedMissing"),
+            train.PretrainedWeights);
+
+        HashSet<string> texts = [.. view
+            .GetVisualDescendants()
+            .OfType<TextBlock>()
+            .Select(block => block.Text ?? string.Empty)];
+
+        Assert.Contains(Localizer.Instance.Get("Train.Pretrained"), texts);
+        Assert.Contains(train.PretrainedWeights, texts);
     }
 
     [AvaloniaFact]

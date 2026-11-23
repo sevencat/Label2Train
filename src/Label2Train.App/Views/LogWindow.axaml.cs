@@ -1,7 +1,9 @@
 using System.ComponentModel;
 using Avalonia.Controls;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
 using Label2Train.App.ViewModels;
+using Label2Train.Core.Infrastructure.Logging;
 
 namespace Label2Train.App.Views;
 
@@ -13,18 +15,37 @@ public partial class LogWindow : Window
     /// <summary>XAML 预览用。</summary>
     public LogWindow() => InitializeComponent();
 
-    public LogWindow(MainWindowViewModel viewModel) : this()
+    public LogWindow(MainWindowViewModel viewModel, LogBuffer buffer) : this()
     {
         _viewModel = viewModel;
         DataContext = viewModel;
 
         Opened += (_, _) =>
         {
+            // 打开时先把窗口关着期间攒下的行补上，再开始逐条追加
+            viewModel.RefreshLog();
+            buffer.EntryAdded += OnEntryAdded;
+
             LogScroll.ScrollToEnd();
             viewModel.PropertyChanged += OnViewModelChanged;
         };
 
-        Closed += (_, _) => viewModel.PropertyChanged -= OnViewModelChanged;
+        Closed += (_, _) =>
+        {
+            buffer.EntryAdded -= OnEntryAdded;
+            viewModel.PropertyChanged -= OnViewModelChanged;
+        };
+    }
+
+    /// <summary>NLog 在后台线程写缓冲，这里切回 UI 线程再改绑定的文本。</summary>
+    private void OnEntryAdded(LogEntry entry)
+    {
+        if (_viewModel is null)
+        {
+            return;
+        }
+
+        Dispatcher.UIThread.Post(() => _viewModel.AppendLog(entry));
     }
 
     private void OnViewModelChanged(object? sender, PropertyChangedEventArgs e)

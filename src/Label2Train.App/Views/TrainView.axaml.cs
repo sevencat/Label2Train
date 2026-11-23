@@ -61,7 +61,8 @@ public partial class TrainView : UserControl
             viewModel.SelectedScale?.Id ?? "n",
             viewModel.Epochs,
             viewModel.BatchSize,
-            viewModel.ImageSize);
+            viewModel.ImageSize,
+            viewModel.Augment);
 
         if (await dialog.ShowDialog<TrainingTarget?>(owner) is not { } target)
         {
@@ -80,6 +81,7 @@ public partial class TrainView : UserControl
         viewModel.Epochs = target.Epochs;
         viewModel.BatchSize = target.BatchSize;
         viewModel.ImageSize = target.ImageSize;
+        viewModel.Augment = target.Augment;
 
         // 换项目 = 重新拉图片清单与标注，顺手记住这个项目
         if (projectChanged)

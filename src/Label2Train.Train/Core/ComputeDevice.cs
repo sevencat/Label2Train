@@ -35,7 +35,11 @@ public static class DeviceFactory
     /// 让探测在启动时就发生（早于窗口与训练线程），避免第一轮训练的日志里还得再等一次初始化。
     /// 多次调用无副作用。
     /// </summary>
-    public static void InitializeDefault() => _ = LazyDefault.Value;
+    public static void InitializeDefault()
+    {
+        if (LazyDefault.Value == ComputeDevice.Cuda)
+            ConfigureCuda();
+    }
 
     /// <summary>解析设备名（cpu / cuda）；空值表示「用缺省设备」。</summary>
     public static ComputeDevice Parse(string? value)
@@ -65,8 +69,38 @@ public static class DeviceFactory
                 + "并确认 nvidia-smi 可用；详见 docs/backends.md。");
         }
 
+        ConfigureCuda();
         return torch.CUDA;
     }
+
+    /// <summary>
+    /// CUDA 上对训练安全、几乎无损的加速开关（只设一次）。
+    /// <para>
+    /// <c>allow_tf32</c>：Ampere 及以后的显卡用 TF32 做矩阵乘与卷积，吞吐通常提升 1.5~2 倍，
+    /// 对检测训练精度的影响在千分位以内。输入尺寸固定（训练/验证同一个 imgsz）本来还能再开
+    /// cuDNN 的 <c>benchmark</c>，但 TorchSharp 0.107 没有暴露该属性，这里只能留默认。
+    /// </para>
+    /// <para>
+    /// 包了 try/catch：CPU 版 LibTorch 或较老的版本没有这些开关，缺了也不能让训练起不来。
+    /// </para>
+    /// </summary>
+    private static void ConfigureCuda()
+    {
+        if (Interlocked.Exchange(ref _cudaConfigured, 1) != 0)
+            return;
+
+        try
+        {
+            torch.backends.cudnn.allow_tf32 = true;
+            torch.backends.cuda.matmul.allow_tf32 = true;
+        }
+        catch (Exception)
+        {
+            // 没有对应开关就维持默认（FP32）；不影响正确性
+        }
+    }
+
+    private static int _cudaConfigured;
 
 
     /// <summary>人类可读描述（写进日志与检查点元数据）。</summary>

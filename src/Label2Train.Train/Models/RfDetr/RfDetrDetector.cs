@@ -229,8 +229,13 @@ public sealed class RfDetrDetector : Module<Tensor, Tensor>, ILossExtrasProvider
 
         using (torch.no_grad())
         {
-            query_embed.normal_(0, 0.02);
-            refpoint_embed.fill_(0.5);
+            // 官方 query_feat 就是 PyTorch Embedding 的默认 N(0,1)（权重里 std≈1.0）。
+            // 之前用 0.02：300 个 query 的初始内容几乎一模一样，参考点又全是 (0.5,0.5)，
+            // 于是每个 query 采样到同一批特征、解码出同一个框和同一个分数——
+            // 训练再多轮也分不出「哪个 query 负责哪个目标」，mAP 永远是 0，分数还会整体塌到 0.06。
+            query_embed.normal_(0, 1);
+            // 参考点同样要错开：全 0.5 会让所有 query 从图像正中出发、采样位置完全重叠
+            refpoint_embed.uniform_(0, 1);
         }
     }
 
@@ -374,61 +379,130 @@ public sealed class RfDetrDetector : Module<Tensor, Tensor>, ILossExtrasProvider
 
         if (enc_output is not null)
         {
-            // 两阶段：每组用自己的 enc_output + 辅助头预测类别/框，各组独立 top-k 选出 Queries 个提议
+            // 官方两阶段：参考点 = 网格提议 + 各组 enc_out_bbox_embed 的偏移（都在 logit 空间），
+            // 按类别分数取 top-k。之前直接用 sigmoid 后的辅助头输出当参考点，等于丢掉了网格先验。
+            Tensor grid = GridProposals(
+                batch, (int)levels[0].shape[2], (int)levels[0].shape[3], input.device);
+
             var queryGroups = new List<Tensor>(GroupDetr);
             var referenceGroups = new List<Tensor>(GroupDetr);
 
             for (int group = 0; group < GroupDetr; group++)
             {
                 Tensor proposal = enc_output_norm![group].forward(enc_output[group].forward(memory));
-                Tensor proposalReference = enc_out_bbox_embed![group].forward(proposal).sigmoid();
+                Tensor proposalDelta = enc_out_bbox_embed![group].forward(proposal);
                 Tensor proposalLogits = enc_out_class_embed![group].forward(proposal);
 
                 Tensor indices = proposalLogits.max(-1).values.topk(Queries, dim: 1).indexes;
                 Tensor gatherIndex = indices.unsqueeze(-1);
 
                 queryGroups.Add(proposal.gather(1, gatherIndex.expand(batch, Queries, EmbeddingSize)));
-                referenceGroups.Add(proposalReference.gather(
-                    1, gatherIndex.expand(batch, Queries, proposalReference.shape[^1])));
+
+                using Tensor refined = proposalDelta.add(grid);
+                referenceGroups.Add(refined.gather(
+                    1, gatherIndex.expand(batch, Queries, refined.shape[^1])));
 
                 // 供两阶段辅助损失使用；**不 detach**，否则辅助损失只能"算"不能"学"。
                 // 生命周期：保留到下一次 forward，训练器在同一个 step 内取用，不会无限累积。
-                LastProposal = (proposalLogits, proposalReference);
+                LastProposal = (proposalLogits, refined.sigmoid());
             }
 
             queries = queries + torch.cat(queryGroups.ToArray(), 1);
             references = torch.cat(referenceGroups.ToArray(), 1);
         }
 
-        Tensor centers = references.narrow(2, 0, 2).contiguous();
-        Tensor points = ExpandReference(centers);
+        // 最终框用的是「最后一层的输入参考点」，它已含前面各层的增量；
+        // 若直接用循环结束后的 references，最后一层的 delta 会被算两次（实测把框顶到 sigmoid 饱和）。
+        Tensor lastReference = references;
 
         for (int index = 0; index < decoder_layers.Count; index++)
         {
+            // 参考点全程以 logit 空间保存（官方 refpoints_unsigmoid），采样前才 sigmoid
+            Tensor centers = references.narrow(2, 0, 2).sigmoid();
+            Tensor points = ExpandReference(centers);
+
             Tensor layerInput = queries;
 
             if (ref_point_head is not null)
             {
                 // 官方做法：参考点做 sin/cos 位置编码后过 MLP，再与 query 相加
-                layerInput = queries + ref_point_head.forward(SineEmbed(references));
+                layerInput = queries + ref_point_head.forward(SineEmbed(references.sigmoid()));
             }
 
             queries = decoder_layers[index].Forward(layerInput, points, levels);
 
-            // 逐层框细化：预测中心点增量，夹到 0~1 作为下一层参考点（宽高当前保持不变）。
-            // 官方 lite_refpoint_refine：复用 bbox_embed 的前两维作为中心点增量，不额外加参数
-            centers = centers.add(bbox_embed.forward(queries).narrow(-1, 0, 2)).sigmoid();
-            points = ExpandReference(centers);
+            lastReference = references;
 
-            if (_refDims == 4)
-                references = torch.cat(new[] { centers, references.narrow(2, 2, 2) }, -1);
+            // 官方 refpoints_refine（bbox_reparam=False）：直接在 logit 空间累加，不再二次 sigmoid
+            references = AddReference(references, bbox_embed.forward(queries));
         }
 
         queries = decoder_norm.forward(queries.narrow(1, 0, Queries));
 
-        Tensor boxes = bbox_embed.forward(queries).sigmoid();
+        // 官方 (bbox_embed(hs) + ref_unsigmoid).sigmoid()：漏掉 reference 时输出只能从 0.5 起步，
+        // 框回归要先学会"绝对位置"，分类也跟着慢一个量级。
+        Tensor boxDeltas = bbox_embed.forward(queries);
+        Tensor boxes;
+
+        if (references.shape[^1] == 4)
+        {
+            boxes = boxDeltas.add(lastReference.narrow(1, 0, Queries)).sigmoid();
+        }
+        else
+        {
+            // 参考点只有中心（2 维）时，宽高没有先验可加，退回纯 sigmoid
+            using Tensor centers = boxDeltas.narrow(-1, 0, 2)
+                .add(lastReference.narrow(1, 0, Queries)).sigmoid();
+            using Tensor sizes = boxDeltas.narrow(-1, 2, 2).sigmoid();
+            boxes = torch.cat(new[] { centers, sizes }, -1);
+        }
+
         Tensor logits = class_embed.forward(queries);
         return torch.cat(new[] { boxes, logits }, -1);
+    }
+
+    /// <summary>
+    /// 官方 <c>gen_encoder_output_proposals</c> 的网格提议（<c>unsigmoid=True</c>）：
+    /// 中心 <c>(x+0.5)/W</c>、宽高 <c>0.05·2^level</c>（单档即 0.05），最后取 logit。
+    /// </summary>
+    private static Tensor GridProposals(long batch, int height, int width, Device device)
+    {
+        var grid = new float[height * width * 4];
+        int cursor = 0;
+
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                grid[cursor++] = Logit((x + 0.5f) / width);
+                grid[cursor++] = Logit((y + 0.5f) / height);
+                grid[cursor++] = Logit(0.05f);
+                grid[cursor++] = Logit(0.05f);
+            }
+        }
+
+        return TorchInterop
+            .FromArray(grid, new long[] { 1, height * width, 4 }, device)
+            .expand(batch, -1, -1);
+    }
+
+    /// <summary>参考点累加：4 维时整体相加，2 维（只有中心）时只加中心增量。</summary>
+    private static Tensor AddReference(Tensor reference, Tensor delta)
+    {
+        if (reference.shape[^1] == 4)
+        {
+            return reference + delta;
+        }
+
+        using Tensor center = delta.narrow(-1, 0, 2);
+        return reference + center;
+    }
+
+    private static float Logit(float value)
+    {
+        const float eps = 1e-5f;
+        float clamped = Math.Clamp(value, eps, 1f - eps);
+        return MathF.Log(clamped / (1f - clamped));
     }
 
     /// <summary>把参考点 <c>[B,Q,2]</c> 复制到每个尺度，得到 <c>[B,Q,Levels,2]</c>。</summary>

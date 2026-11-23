@@ -17,6 +17,7 @@ using Label2Train.Core.Localization;
 using Label2Train.Core.Simulation;
 using Label2Train.Core.Storage;
 using Label2Train.Train.Export;
+using Label2Train.Train.Models.RfDetr;
 using Label2Train.Train.Training;
 
 namespace Label2Train.App.ViewModels;
@@ -75,6 +76,14 @@ public partial class TrainViewModel : ObservableObject
     [ObservableProperty]
     private decimal _imageSize = TrainingPresets.Yolo.ImageSize;
 
+    /// <summary>
+    /// 训练集是否开数据增强（只对 RF-DETR 生效，YOLO 走自己的 pipeline）。
+    /// 默认开；程序渲染、背景一致的数据上关掉常常更准（实测 20 轮 mAP50 0.89 vs 0.74），
+    /// 所以放进「训练目标设置」让用户自己选，而不是写死在代码里。
+    /// </summary>
+    [ObservableProperty]
+    private bool _augment = true;
+
     /// <summary>训练成哪个家族：YOLOv8 / YOLOv11 / RF-DETR。</summary>
     public IReadOnlyList<ModelOption> ModelFamilies { get; } =
     [
@@ -108,6 +117,9 @@ public partial class TrainViewModel : ObservableObject
     /// <summary>规模下拉只在 YOLO 家族下有用，选到 RF-DETR 就置灰。</summary>
     public bool IsScaleEnabled => !TrainingPresets.IsDetrFamily(SelectedModel?.Id);
 
+    /// <summary>当前是不是 RF-DETR：只有它用预训练权重热启动，界面才显示权重那一行。</summary>
+    public bool IsDetrFamily => TrainingPresets.IsDetrFamily(SelectedModel?.Id);
+
     /// <summary>主界面「模型」只读显示：家族名。</summary>
     public string ModelNameText => SelectedModel?.Name ?? string.Empty;
 
@@ -120,6 +132,31 @@ public partial class TrainViewModel : ObservableObject
     public string ModelText => IsScaleEnabled
         ? $"{SelectedModel?.Name} {SelectedScale?.Id}"
         : SelectedModel?.Name ?? string.Empty;
+
+    /// <summary>
+    /// RF-DETR 会加载的预训练权重，直接显示在界面「模型」那一行（只写文件名，完整路径进 ToolTip）。
+    /// 与训练侧共用同一个解析入口 <see cref="RfDetrWeightSource.Resolve"/>，所以界面上写的
+    /// 就是训练实际会用的那一份；找不到时明说「随机初始化」，免得留空让人以为一切正常。
+    /// </summary>
+    [ObservableProperty]
+    private string _pretrainedWeights = string.Empty;
+
+    /// <summary>预训练权重的完整路径；没找到权重时为空。</summary>
+    public string PretrainedWeightsPath { get; private set; } = string.Empty;
+
+    /// <summary>找到权重了：界面用正常色显示文件名。</summary>
+    public bool HasPretrainedWeights => PretrainedWeightsPath.Length > 0;
+
+    /// <summary>选了 RF-DETR 又没找到权重：界面用告警色提示从随机初始化开始。</summary>
+    public bool ShowPretrainedWeightsMissing => IsDetrFamily && !HasPretrainedWeights;
+
+    /// <summary>ToolTip：找到权重就给完整路径，没找到就说清放哪儿、怎么设环境变量。</summary>
+    public string PretrainedWeightsTip => HasPretrainedWeights
+        ? PretrainedWeightsPath
+        : Loc.Format(
+            "Train.PretrainedMissingTip",
+            Path.Combine(AppDataPaths.DataDirectory, RfDetrWeightSource.FolderName),
+            RfDetrWeightSource.Variable);
 
     /// <summary>主界面「训练目标」一行摘要：项目 · 模型 规模；参数在右边单独只读展示。</summary>
     public string TargetSummary => Loc.Format(
@@ -136,6 +173,14 @@ public partial class TrainViewModel : ObservableObject
     public string BatchSizeText => ((int)BatchSize).ToString(CultureInfo.InvariantCulture);
 
     public string ImageSizeText => ((int)ImageSize).ToString(CultureInfo.InvariantCulture);
+
+    /// <summary>主界面只读展示：数据增强开 / 关；YOLO 不显示（它不认这个开关）。</summary>
+    public string AugmentText => Loc.Get(Augment ? "Train.AugmentOn" : "Train.AugmentOff");
+
+    /// <summary>只有 RF-DETR 显示增强这一格。</summary>
+    public bool ShowAugment => IsDetrFamily;
+
+    partial void OnAugmentChanged(bool value) => OnPropertyChanged(nameof(AugmentText));
 
     partial void OnEpochsChanged(decimal value)
     {
@@ -162,11 +207,14 @@ public partial class TrainViewModel : ObservableObject
     {
         RaiseRunState();
         OnPropertyChanged(nameof(IsScaleEnabled));
+        OnPropertyChanged(nameof(IsDetrFamily));
+        OnPropertyChanged(nameof(ShowAugment));
         OnPropertyChanged(nameof(ModelKey));
         OnPropertyChanged(nameof(ModelNameText));
         OnPropertyChanged(nameof(ScaleText));
         OnPropertyChanged(nameof(ModelText));
         OnPropertyChanged(nameof(TargetSummary));
+        RefreshPretrainedWeights();
         SyncOutputDirectory();
         ReportImageSizeIfBlocked();
     }
@@ -371,6 +419,9 @@ public partial class TrainViewModel : ObservableObject
         logger.LogInformation("训练工作台已创建，等待选择数据集");
 
         LogText = string.Join(Environment.NewLine, logBuffer.Snapshot().Select(entry => entry.ToString()));
+
+        // 默认家族是 YOLO，先算好；切到 RF-DETR 时界面直接就有值
+        RefreshPretrainedWeights();
     }
 
     /// <summary>
@@ -387,6 +438,9 @@ public partial class TrainViewModel : ObservableObject
         }
 
         _initialized = true;
+
+        // 进训练页再对一次：应用启动后、切到这一页之前可能刚把权重拷进 data/weights
+        RefreshPretrainedWeights();
 
         await RefreshProjectsAsync(ct).ConfigureAwait(true);
 
@@ -405,6 +459,26 @@ public partial class TrainViewModel : ObservableObject
             Status = Loc.Get("Train.Ready");
             DatasetSummary = Loc.Get("Train.NoDataset");
         }
+
+        // 「未找到（随机初始化）」这条文案是本地化的，换语言要跟着重算
+        RefreshPretrainedWeights();
+    }
+
+    /// <summary>
+    /// 重新解析 RF-DETR 的预训练权重并刷新界面：换模型、进训练页、开始训练、训练收尾、切语言都调它。
+    /// 只列一次 <c>data/weights</c>，开销可以忽略。
+    /// </summary>
+    private void RefreshPretrainedWeights()
+    {
+        string? path = RfDetrWeightSource.Resolve();
+
+        PretrainedWeightsPath = path ?? string.Empty;
+        PretrainedWeights = path is null ? Loc.Get("Train.PretrainedMissing") : Path.GetFileName(path);
+
+        OnPropertyChanged(nameof(PretrainedWeightsPath));
+        OnPropertyChanged(nameof(HasPretrainedWeights));
+        OnPropertyChanged(nameof(ShowPretrainedWeightsMissing));
+        OnPropertyChanged(nameof(PretrainedWeightsTip));
     }
 
     // ── 数据集 ────────────────────────────────────────────────────────────────
@@ -785,6 +859,9 @@ public partial class TrainViewModel : ObservableObject
             return;
         }
 
+        // 训练前一刻再解析一次：界面显示的必须是这次真正要加载的那份
+        RefreshPretrainedWeights();
+
         _training = new CancellationTokenSource();
         _control = new TrainControl(_training.Token);
         _control.PausedChanged += OnPausedChanged;
@@ -823,6 +900,7 @@ public partial class TrainViewModel : ObservableObject
                 Scale: scale.Length > 0 ? scale : "n",
                 Family: SelectedModel?.Id ?? "v8")
             {
+                Augment = Augment,
                 Progress = progress,
                 Log = message => log.Report(message),
                 Control = _control,
@@ -873,6 +951,9 @@ public partial class TrainViewModel : ObservableObject
 
             _training?.Dispose();
             _training = null;
+
+            // 训练期间权重可能被挪走或换掉，收尾时让界面重新对一次
+            RefreshPretrainedWeights();
         }
     }
 

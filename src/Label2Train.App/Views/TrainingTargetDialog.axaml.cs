@@ -15,7 +15,8 @@ public sealed record TrainingTarget(
     int BatchSize,
     int ImageSize,
     string FamilyId,
-    string ScaleId);
+    string ScaleId,
+    bool Augment = true);
 
 /// <summary>项目下拉的一行：<see cref="Display"/> 是给用户看的「名称 · #id」。</summary>
 public sealed record ProjectChoice(long Id, string Display, TinyLabelProjectSummary Project);
@@ -38,7 +39,7 @@ public partial class TrainingTargetDialog : Window
     public TrainingTargetDialog()
         : this([], 0, [new ModelOption("v8", "YOLOv8")], [new ScaleOption("n", "n · nano")],
             "v8", "n", TrainingPresets.Yolo.Epochs, TrainingPresets.Yolo.BatchSize,
-            TrainingPresets.Yolo.ImageSize)
+            TrainingPresets.Yolo.ImageSize, augment: true)
     {
     }
 
@@ -51,7 +52,8 @@ public partial class TrainingTargetDialog : Window
         string scaleId,
         decimal epochs,
         decimal batchSize,
-        decimal imageSize)
+        decimal imageSize,
+        bool augment = true)
     {
         InitializeComponent();
 
@@ -80,6 +82,7 @@ public partial class TrainingTargetDialog : Window
         EpochsBox.Value = epochs;
         BatchBox.Value = batchSize;
         ImageSizeBox.Value = imageSize;
+        AugmentBox.IsChecked = augment;
 
         ModelBox.SelectionChanged += OnModelSelectionChanged;
         ImageSizeBox.ValueChanged += OnImageSizeValueChanged;
@@ -99,8 +102,15 @@ public partial class TrainingTargetDialog : Window
         UpdateImageSizeHint();
     }
 
-    /// <summary>RF-DETR 的体量由 queries / 层数决定，规模下拉直接置灰。</summary>
-    private void UpdateScaleState() => ScaleBox.IsEnabled = !IsDetr;
+    /// <summary>
+    /// RF-DETR 的体量由 queries / 层数决定，规模下拉直接置灰；
+    /// 增强开关也只有 RF-DETR 认（YOLO 的 hflip / mosaic 在它自己的 pipeline 里）。
+    /// </summary>
+    private void UpdateScaleState()
+    {
+        ScaleBox.IsEnabled = !IsDetr;
+        AugmentBox.IsEnabled = IsDetr;
+    }
 
     private void OnPresetYolo(object? sender, RoutedEventArgs e) => ApplyPreset(TrainingPresets.Yolo);
 
@@ -170,7 +180,8 @@ public partial class TrainingTargetDialog : Window
             (int)(BatchBox.Value ?? TrainingPresets.Yolo.BatchSize),
             imageSize,
             (ModelBox.SelectedItem as ModelOption)?.Id ?? "v8",
-            (ScaleBox.SelectedItem as ScaleOption)?.Id ?? "n"));
+            (ScaleBox.SelectedItem as ScaleOption)?.Id ?? "n",
+            AugmentBox.IsChecked ?? true));
     }
 
     private void OnCancel(object? sender, RoutedEventArgs e) => Close(null);

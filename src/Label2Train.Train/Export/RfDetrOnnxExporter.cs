@@ -202,24 +202,16 @@ public static class RfDetrOnnxExporter
             new long[] { 1, detector.Queries, RfDetrDetector.EmbeddingSize },
             TorchInterop.ToArray(context.State("query_embed")));
 
-        // 官方参考点是 4 维 cxcywh（后两维是归一化宽高），2 维 xy 是早期的简化版
+        // 官方参考点是 4 维 cxcywh（后两维是归一化宽高），2 维 xy 是早期的简化版；
+        // 两者都以 logit 空间（refpoints_unsigmoid）参与运算，采样/位置编码前才 sigmoid。
         int referenceDims = detector.UsesRefPointHead ? 4 : 2;
         float[] referenceValues = TorchInterop.ToArray(context.State("refpoint_embed"));
-        var centerValues = new float[detector.Queries * 2];
 
-        for (int query = 0; query < detector.Queries; query++)
-        {
-            centerValues[query * 2] = referenceValues[query * referenceDims];
-            centerValues[query * 2 + 1] = referenceValues[query * referenceDims + 1];
-        }
+        string references = context.ConstantFloat(
+            "rf.references", new long[] { 1, detector.Queries, referenceDims }, referenceValues);
 
-        string centers = context.ConstantFloat(
-            "rf.centers", new long[] { 1, detector.Queries, 2 }, centerValues);
-
-        // 4 维时每层都要先用 ref_point_head 把完整参考点编码回 query 空间
-        string? references = referenceDims == 4
-            ? context.ConstantFloat("rf.references", new long[] { 1, detector.Queries, 4 }, referenceValues)
-            : null;
+        // 最终框用「最后一层之前」的参考点：循环结束后 references 已含最后一层增量，再叠加会算两次
+        string lastReference = references;
 
         int decoderHeads = Heads(state, "decoder_layers.0.deform_attn.", levels, detector.DeformPoints);
 
@@ -229,10 +221,10 @@ public static class RfDetrOnnxExporter
 
             string layerInput = queries;
 
-            if (references is not null)
+            if (detector.UsesRefPointHead)
             {
                 string encoded = context.AppendSineEmbed(
-                    references,
+                    context.AppendSigmoid(references, $"rf.dec{index}.refsigmoid"),
                     referenceDims,
                     RfDetrDetector.EmbeddingSize,
                     detector.Queries,
@@ -244,8 +236,14 @@ public static class RfDetrOnnxExporter
                 layerInput = context.AppendAdd(queries, head, $"rf.dec{index}.refpoint.sum");
             }
 
+            // 采样点只取参考点的前两维（中心），并从 logit 空间切回 0..1
             string points = context.AppendExpand(
-                context.AppendUnsqueeze(centers, $"rf.dec{index}.unsqueeze", axis: 2),
+                context.AppendUnsqueeze(
+                    context.AppendSigmoid(
+                        context.AppendSlice(references, $"rf.dec{index}.center", axis: 2, start: 0, end: 2),
+                        $"rf.dec{index}.center.sigmoid"),
+                    $"rf.dec{index}.unsqueeze",
+                    axis: 2),
                 new long[] { 1, detector.Queries, levels, 2 },
                 $"rf.dec{index}.points");
 
@@ -284,32 +282,45 @@ public static class RfDetrOnnxExporter
             ffn = context.AppendLinear($"{prefix}ffn1", ffn, $"rf.dec{index}.ffn1");
             queries = context.AppendAdd(queries, ffn, $"rf.dec{index}.sum3");
 
-            // 官方 lite_refpoint_refine：复用 bbox_embed 的前两维作为中心点增量（无额外参数）
+            // 官方 refpoints_refine（bbox_reparam=False）：直接在 logit 空间累加 bbox_embed 的输出
+            lastReference = references;
             string boxOutput = context.AppendMlp("bbox_embed.layers", queries, $"rf.dec{index}.box", layerCount: 3);
-            string delta = context.AppendSlice(boxOutput, $"rf.dec{index}.refine", axis: 2, start: 0, end: 2);
-            centers = context.AppendSigmoid(
-                context.AppendAdd(centers, delta, $"rf.dec{index}.center.sum"),
-                $"rf.dec{index}.center");
 
-            // 4 维参考点的后两维（宽高）不细化，沿用常量，只把中心替换成刚算出来的
-            if (references is not null)
-            {
-                references = context.AppendConcat(
-                    new[]
-                    {
-                        centers,
-                        context.AppendSlice(references, $"rf.dec{index}.size", axis: 2, start: 2, end: 4),
-                    },
-                    axis: 2,
-                    $"rf.dec{index}.references");
-            }
+            references = referenceDims == 4
+                ? context.AppendAdd(references, boxOutput, $"rf.dec{index}.refine")
+                : context.AppendAdd(
+                    references,
+                    context.AppendSlice(boxOutput, $"rf.dec{index}.refine", axis: 2, start: 0, end: 2),
+                    $"rf.dec{index}.refine.center");
         }
 
         queries = context.AppendLayerNorm("decoder_norm", queries, "rf.dec.out");
 
         // 6) 检测头：bbox_embed 三层 MLP + class_embed 单层 Linear（与官方键名一致）
-        string boxes = context.AppendSigmoid(
-            context.AppendMlp("bbox_embed.layers", queries, "rf.box", layerCount: 3), "rf.boxes");
+        //    框 = (bbox_embed(queries) + refpoints_unsigmoid).sigmoid()，漏掉参考点时只能从 0.5 起步
+        string boxDeltas = context.AppendMlp("bbox_embed.layers", queries, "rf.box", layerCount: 3);
+        string boxes;
+
+        if (referenceDims == 4)
+        {
+            boxes = context.AppendSigmoid(
+                context.AppendAdd(boxDeltas, lastReference, "rf.box.sum"), "rf.boxes");
+        }
+        else
+        {
+            string centers = context.AppendSigmoid(
+                context.AppendAdd(
+                    context.AppendSlice(boxDeltas, "rf.box.center", axis: 2, start: 0, end: 2),
+                    lastReference,
+                    "rf.box.center.sum"),
+                "rf.box.center");
+
+            string sizes = context.AppendSigmoid(
+                context.AppendSlice(boxDeltas, "rf.box.size", axis: 2, start: 2, end: 4),
+                "rf.box.size");
+
+            boxes = context.AppendConcat(new[] { centers, sizes }, axis: 2, "rf.boxes");
+        }
 
         string logits = context.AppendLinear("class_embed", queries, "rf.logits");
 

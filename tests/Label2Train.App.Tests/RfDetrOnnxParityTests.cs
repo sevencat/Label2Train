@@ -2,6 +2,7 @@ using Label2Train.Train.Export;
 using Label2Train.Train.Models.RfDetr;
 using OnnxSharp.Core;
 using TorchSharp;
+using TorchSharp.Modules;
 using Xunit;
 using static TorchSharp.torch;
 // OnnxSharp 也有 <c>RfDetrDetector</c>，这里只借用它的解码器，避免与训练侧的检测器重名
@@ -27,9 +28,6 @@ public sealed class RfDetrOnnxParityTests
         const int size = 336;   // 同时是 14（patch）与 16（位置网格）的倍数
         string path = Path.Combine(Path.GetTempPath(), $"label2train-rfdetr-parity-{Guid.NewGuid():N}.onnx");
 
-        // 固定权重与输入：随机初始化偶尔会给出极端激活，让对拍变成不可复现的失败
-        torch.manual_seed(1234);
-
         try
         {
             float[] pixels;
@@ -42,6 +40,9 @@ public sealed class RfDetrOnnxParityTests
                 heads: 8,
                 device: torch.CPU))
             {
+                // 权重不用随机初始化：见 FillDeterministically 的说明
+                FillDeterministically(detector);
+
                 using Tensor input = torch.rand(new long[] { 1, 3, size, size });
                 pixels = input.flatten().data<float>().ToArray();
 
@@ -264,6 +265,34 @@ public sealed class RfDetrOnnxParityTests
         }
     }
 
+    /// <summary>
+    /// 把所有权重写成固定种子的小随机数。
+    /// <para>
+    /// 不能靠 <c>torch.manual_seed</c>：实测同一个 seed 连续建模型，得到的权重并不一样
+    /// （libtorch 的全局 RNG 在进程内没被真正复位），于是随机初始化的 RF-DETR 偶尔初始化出
+    /// 一组让前向全 NaN 的权重（120/120 NaN），对拍就变成「跑五次红一次」。
+    /// 权重由 .NET 的 <see cref="Random"/> 决定，才是真可复现，也顺带避开极端初始化的数值爆点。
+    /// </para>
+    /// </summary>
+    private static void FillDeterministically(RfDetrDetector module)
+    {
+        var rng = new Random(20240118);
+
+        foreach ((string _, Parameter parameter) in module.named_parameters())
+        {
+            var values = new float[parameter.numel()];
+
+            for (int index = 0; index < values.Length; index++)
+                values[index] = (float)((rng.NextDouble() - 0.5) * 0.1);
+
+            using Tensor source = torch.tensor(values).reshape(parameter.shape);
+            using (torch.no_grad())
+            {
+                parameter.copy_(source);
+            }
+        }
+    }
+
     /// <summary>把 <c>[1,Q,C]</c> 的扁平数组包成 OnnxSharp 张量，供解码器使用。</summary>
     private static OnnxSharp.Tensors.Tensor DecoderInput(float[] values, int queries, int channels) =>
         OnnxSharp.Tensors.Tensor.FromArray(
@@ -308,7 +337,9 @@ public sealed class RfDetrOnnxParityTests
 
         Assert.True(
             boxWorst < 1e-3 && logitWorst < 1e-3,
-            $"ONNX 与 torch 的输出现不一致：box 误差 {boxWorst:E3}，logit 误差 {logitWorst:E3}");
+            $"ONNX 与 torch 的输出现不一致：box 误差 {boxWorst:E3}，logit 误差 {logitWorst:E3}；"
+            + $"torch NaN {expected.Count(float.IsNaN)}/{expected.Length}，"
+            + $"ONNX NaN {boxes.Count(float.IsNaN) + logits.Count(float.IsNaN)}/{boxes.Length + logits.Length}");
     }
 
     private static float[] Take(

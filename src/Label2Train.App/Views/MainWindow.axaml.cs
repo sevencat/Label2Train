@@ -6,6 +6,7 @@ using Avalonia.Interactivity;
 using Injectio.Attributes;
 using Label2Train.App.ViewModels;
 using Label2Train.Core.Infrastructure;
+using Label2Train.Core.Infrastructure.Logging;
 using Label2Train.Core.Localization;
 
 namespace Label2Train.App.Views;
@@ -19,12 +20,14 @@ namespace Label2Train.App.Views;
 public partial class MainWindow : Window
 {
     private LogWindow? _logWindow;
+    private readonly LogBuffer? _logBuffer;
 
     /// <summary>XAML 预览用。</summary>
     public MainWindow() => InitializeComponent();
 
-    public MainWindow(MainWindowViewModel viewModel, StartupOptions startup) : this()
+    public MainWindow(MainWindowViewModel viewModel, StartupOptions startup, LogBuffer logBuffer) : this()
     {
+        _logBuffer = logBuffer;
         DataContext = viewModel;
 
         // 命令行指定了目录就打开它（--annotate 再进首图标注），否则回到上次的数据目录
@@ -138,7 +141,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        _logWindow = new LogWindow(viewModel);
+        if (_logBuffer is null)
+        {
+            return;
+        }
+
+        _logWindow = new LogWindow(viewModel, _logBuffer);
         _logWindow.Closed += (_, _) => _logWindow = null;
         _logWindow.Show(this);
     }

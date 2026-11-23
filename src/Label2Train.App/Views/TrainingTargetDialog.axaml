@@ -89,6 +89,14 @@
                  TextWrapping="Wrap" Margin="78,0,0,0" />
     </StackPanel>
 
+    <!-- 增强只对 RF-DETR 生效：YOLO 走自己的 pipeline（hflip + mosaic），这里没有开关 -->
+    <StackPanel Spacing="4">
+      <CheckBox x:Name="AugmentBox" Content="{l:Loc Train.Augment}" FontSize="13"
+                ToolTip.Tip="{l:Loc Train.AugmentHint}" />
+      <TextBlock Text="{l:Loc Train.AugmentHint}" FontSize="12" Opacity="0.6"
+                 TextWrapping="Wrap" Margin="26,0,0,0" />
+    </StackPanel>
+
     <StackPanel Orientation="Horizontal" Spacing="8" HorizontalAlignment="Right">
       <Button Content="{l:Loc Train.Cancel}" Click="OnCancel" MinWidth="76" />
       <Button Content="{l:Loc Train.Ok}" Click="OnOk" MinWidth="76" IsDefault="True" />
