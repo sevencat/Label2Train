@@ -23,6 +23,182 @@ tools/                  辅助脚本
 默认是 **exe 同级 `data/`**，可用命令行 `--data <目录>` 或环境变量 `LABEL2TRAIN_DATA`
 （也可写进 `.env`）覆盖，命令行优先。整个程序是「绿色」的：拷走 exe 目录就把数据一起带走。
 
+## YOLO 训练参数（v8 / v11 / v26）：在哪改、改了会怎样
+
+这一节的默认值都是**逐个与 ultralytics 8.4.210 数值对拍过**的。对拍不是看文档，而是同一份权重、
+同一个 batch（4 图 320×320、3 类）、同一份 GT，比四个量：前向输出、loss 分项、整网梯度范数、
+TAL 分配结果。v8 / v11 / v26 三家全部对齐（数字见下一节），所以下面的默认值可以直接当作「官方口径」，
+改任何一个都会让训练偏离官方实现。
+
+参数分三层，改的地方各不相同。
+
+### 对齐核对结果（v8 / v11 / v26，2026-11-24 复测）
+
+核对办法：把本实现建出来的网导出成 safetensors，官方 `DetectionModel(cfg=..., nc=3, ch=3)` 用
+`load_state_dict(strict=False)` 载入同一组张量（v26 载 `yolo26.yaml`，两套头都载），两边吃同一份
+输入和 GT，各自跑前向 + loss + `backward()`。TAL 分配结果靠在官方侧 patch
+`TaskAlignedAssigner.forward` 抓。
+
+| 量（官方 vs 本实现） | yolov8n | yolo11n | yolo26n |
+|---|---|---|---|
+| 前向输出和 | 相对差 < 1e-7 | 339477.9375 vs 339477.9（1e-7） | -95591.0703 vs -95591.06（1e-7） |
+| loss 总项 | 差 0.02% | 20.2575569 vs 20.257563（3e-7） | 19.4518242 vs 19.451828（2e-7） |
+| 整网梯度范数 | 差 0.12% | 350.69543 vs 350.69645（3e-6） | 127.40212 vs 127.40607（3e-5） |
+| TAL 正样本数 | 90 / 90 | 90 / 90（one-to-one 那路不适用） | o2m 90/90，o2o 9/9 |
+| TAL 目标分之和 | 逐点相同 | 57.850769 vs 57.85079 | o2o 7.702569 vs 7.702569 |
+| TAL 正样本位置 | 90 个逐点相同 | 前 40 个逐点相同 | o2o 9 个逐点相同 |
+
+**分项对不上是正常的，别当成 bug**：本实现报的分项是**没乘 gain** 的原始值，官方报的是乘过
+`box=7.5 / cls=0.5 / dfl=1.5` 的。乘回去就逐项吻合：
+
+| 分项 | v11 本实现 × gain | 官方 | v26 o2m 本实现 × gain | 官方 | v26 o2o 本实现 × gain | 官方 |
+|---|---|---|---|---|---|---|
+| box | 0.088324 × 7.5 = 0.66243 | 0.6624333 | 0.13275301 × 7.5 = 0.9956476 | 0.9956467 | 0.14128037 × 7.5 = 1.0596028 | 1.0596031 |
+| cls | 7.0493765 × 0.5 = 3.524688 | 3.5246878 | 7.419924 × 0.5 = 3.709962 | 3.7099619 | 8.763583 × 0.5 = 4.381791 | 4.3817911 |
+| dfl | 0.5848458 × 1.5 = 0.877269 | 0.8772685 | 0.006831013 × 1.5 = 0.0102465 | 0.0102465 | 0.006645188 × 1.5 = 0.0099678 | 0.0099678 |
+
+为了让三家都对上，这一轮改掉了五处（前三处是真正的语义偏差，第四处是「选 best」的口径，
+第五处只有训练曲线能暴露）：
+
+1. **冲突锚点必须丢弃**（`TaskAlignedAssigner`）。一个锚点被多个 GT 的 top-k 同时选中时，官方是
+   `count_tensor > 1 → mask 0`，直接变成负样本；本实现原来是「归给分数更高的那个 GT」。目标越密集
+   偏得越厉害（同一个锚点被反复复用，正样本个数和分数和都对不上），已按官方改成丢弃，
+   `YoloTalAssignerTests.Conflicting_Anchor_Is_Dropped_Not_Stolen` 守着这条。
+2. **`pos_overlaps` 只在 `mask_pos` 内取 max**（同上）。官方是 `(overlaps * mask_pos).amax(-1)`，
+   本实现原来在整张网格上取 max。v8 / v11 的 top-k 候选多，两种写法几乎等价；v26 的 one-to-one
+   分支 `topk2=1` 只剩一个候选，整网格 max 会把归一化系数抬高约 4%，目标分和前景个数直接对不上。
+3. **v26 双头权重按官方调度衰减**（`YoloEndToEndDetectionLoss`）。one-to-many 0.8 → 0.1、
+   one-to-one 0.2 → 0.9，`decay(x) = max(1 - x/(epochs-1), 0) * (0.8 - 0.1) + 0.1`，每个 epoch 末
+   更新一次（走 `IEpochAwareLoss`，`Trainer` 在 epoch 边界调，和日志节流无关）；one-to-one 分支用
+   `tal_topk=7, tal_topk2=1`。原来是 1:1 直接相加、`topK=1`。
+4. **选 best 用官方 fitness**。ultralytics 的 `DetMetrics.fitness = 0.1 * mAP50 + 0.9 * mAP50-95`，
+   本实现原来只比 mAP50。6 张验证集上 mAP50 第一轮就饱和到 1.0，按 mAP50 选会把早期那轮
+   （mAP50-95 只有 0.85）当成 best 导出。现在 `train.json` 里也多了 `bestMap50_95` 字段，
+   而且是**best 那一轮**的值，不是最后一轮。
+5. **AdamW 的衰减分组对齐**（`BuildOptimizer` + `TrainerOptions.DecayOnlyParameters`）。
+   官方 `build_optimizer` 分三组：conv/linear 权重吃 5e-4，BN/LN 权重和所有 bias 的
+   weight_decay 是 **0**。本实现原来是单组 AdamW，全部参数一起吃衰减——数值对拍查不出来
+   （前向/loss/梯度都一样），但训练动力学不同：yolo11n 因此系统性低 0.06，改完立刻回到官方区间
+   （见下面实测表）。TorchSharp 的 `ParamGroup` 不支持逐组 `weight_decay`，所以优化器按
+   `weight_decay: 0` 建，衰减由 `Trainer` 在每步更新后补 `p *= 1 - lr·wd`
+   （与 `torch.optim.AdamW` 内部逐位等价），只作用于 `named_parameters()` 里
+   「名字不含 `bias` 且维度 ≥ 2」的那些参数。想退回旧行为：环境变量 `LABEL2TRAIN_WD_LEGACY=1`。
+   `TrainerDecoupledWeightDecayTests` 钉住「只有配置的参数被乘、其余一动不动」。
+
+### 1. 损失与正样本分配
+
+改 `YoloLossOptions`（定义在 `src/Label2Train.Train/Training/Yolo/YoloDetectionLoss.cs` 顶部）：
+
+| 参数 | 默认 | 作用 | 调大 / 调小的后果 |
+|---|---|---|---|
+| `BoxWeight` | 7.5 | 定位损失（CIoU）权重 | 调大→框更准但分类学得慢，小目标易抖动；调小→框松散 |
+| `ClassWeight` | 0.5 | 分类（BCE）权重 | 类别多 / 目标小时调大到 1.0 左右；调太大易出现高置信度误检 |
+| `DflWeight` | 1.5 | DFL 权重（`reg_max=1` 时退化成 L1，权重照用） | 调大→边界回归更细但更慢收敛 |
+| `TopK` | **10** | TAL 每个 GT 取 top-k 个候选锚点 | 调大→正样本变多、召回高但定位变糙；调小→正样本稀疏，小目标容易整轮没有正样本。官方 8.4 的 `tal_topk` 就是 10（8.0/8.1 才是 13） |
+| `Alpha` | 0.5 | 分配指标里分类分数的指数 | 调大→更偏向「分类置信度高」的锚点 |
+| `Beta` | 6 | 分配指标里 IoU 的指数 | 调大→更偏向「框贴得准」的锚点，小目标更吃这个 |
+| `ScaleByBatchSize` | `true` | loss 是否乘 batch size（官方行为） | 关掉只是让日志里的 loss 数值小一倍，对梯度方向无影响，不建议改 |
+
+修改方式（`src/Label2Train.Train/Runners/YoloDatasetTrainingRunner.cs`，构造损失的调用处）：
+
+```csharp
+// 原样：全部走默认值（= 官方口径）
+ILoss loss = YoloEndToEndDetectionLoss.CreateFor(
+    model, options.ImageSize, options.ImageSize, classCount, trackComponents: true);
+
+// 改法：传一份自定义 options，只覆盖要动的项
+ILoss loss = YoloEndToEndDetectionLoss.CreateFor(
+    model,
+    options.ImageSize,
+    options.ImageSize,
+    classCount,
+    new YoloLossOptions { TopK = 13, ClassWeight = 1.0f },
+    trackComponents: true);
+```
+
+分配阶段用的相似度是 **CIoU 并 clamp 到 0**（`TaskAlignedAssigner`），这一点写死不可配——
+官方 `iou_calculation` 就是这么做的，换成普通 IoU 会让分配结果偏移（正样本个数和梯度都对不上）。
+
+### 2. 数据增强
+
+改 `YoloPreprocessOptions.TrainDefault`（`src/Label2Train.Train/Data/Images/YoloPreprocessOptions.cs`）：
+
+| 参数 | 默认 | 作用 | 调整建议 |
+|---|---|---|---|
+| `HorizontalFlipProbability` | 0.5 | 水平翻转 | 目标有明确左右语义（如左/右旋钮）时降到 0.2 或关掉 |
+| `MosaicProbability` | 0.5 | 4 图拼贴 | 小数据集的主力增强；目标普遍很大（占半张图）时降到 0.2，否则贴完只剩半截 |
+| `ScaleGain` | 0.5 | 随机缩放 ±50% | 同一相机固定距离拍摄时降到 0.2~0.3 |
+| `TranslateGain` | 0.1 | 随机平移 ±10% | 一般不用动 |
+| `HueGain` / `SaturationGain` / `ValueGain` | 0.015 / 0.7 / 0.4 | HSV 扰动 | 光照变化大的真实照片可保持；纯合成渲染图可降到 0 |
+| `PadValue` | 114 | letterbox 填充灰度 | 不要改，导出端按 114 对齐 |
+
+验证与推理走 `InferenceDefault`（增强全 0）。**验证集开增强会让 mAP 失去可比性**，
+这一项不要动。只想关掉某一项增强时，用 `with` 表达式覆盖，不要改 `TrainDefault` 的默认值：
+
+```csharp
+YoloPreprocessOptions augment = YoloPreprocessOptions.TrainDefault(options.ImageSize)
+    with { MosaicProbability = 0f };
+```
+
+### 3. 优化器与训练超参
+
+`YoloDatasetTrainingRunner` 里写死，或在 `TrainingRunOptions`（`src/Label2Train.Core/Simulation/DatasetTrainingRunner.cs`）
+里从界面 / CLI 传入：
+
+| 项 | 默认 | 位置 | 说明 |
+|---|---|---|---|
+| 优化器 | AdamW | runner 内 | 官方 YOLO 默认是 SGD(lr0=0.01)，这里统一用 AdamW，**不要照搬 SGD 的 0.01** |
+| 初始学习率 | 0.002 | `TrainingRunOptions.LearningRate` | AdamW 常用 1e-3 ~ 2e-3；> 5e-3 在小数据上容易发散 |
+| 权重衰减 | 5e-4，只作用于 conv/linear 权重 | runner 内 `BuildOptimizer` + `TrainerOptions.DecayOnlyParameters` | 与官方 `build_optimizer` 的分组一致：BN/LN 权重与 bias 的衰减为 0。`LABEL2TRAIN_WD_LEGACY=1` 可退回「全部参数一起吃衰减」的旧行为 |
+| warmup | 3 个 epoch | runner 内 | 前 3 轮从 0 线性爬升，之后进余弦段 |
+| 学习率调度 | 余弦退火到 `lr × 0.01` | runner 内 | 末段 1% 收尾，避免最后几轮来回摆 |
+| 梯度裁剪 | 范数 10 | runner 内 | 与官方一致 |
+| EMA 衰减 | `clamp(1 - 3/总步数, 0.9, 0.999)` | runner 内 `EmaDecayFor` | 按步数自适应：小数据集几百步也能得到有意义的平均权重，不会停在初始值 |
+| `Epochs` / `BatchSize` / `ImageSize` / `Scale` / `Family` | 100 / 8 / 640 / n / v8 | `TrainingRunOptions` 主构造参数 | 界面「训练目标设置」里填的就是这些 |
+| 评估阈值 | conf 0.001、NMS IoU 0.7 | `YoloTrainingOptions` | 与官方 val 默认一致；改了就和其他结果不可比 |
+
+`Scale` 与 `Family` 决定建哪个网：`family=v8` 建 `YoloV8DetectionModel`（C2f + SPPF + 三档 Detect），
+`family=v11` 建 `YoloV11DetectionModel`（C3k2 + C2PSA），两者共用上面这套 loss / 增强 / 优化器参数。
+`family=v26` 建 `YoloV26DetectionModel`，走双头（one-to-many + one-to-one）的 `YoloEndToEndDetectionLoss`，
+权重按 0.8→0.1 / 0.2→0.9 衰减，见上面「对齐核对结果」第 3 条。
+
+### 实测参考（20 epoch、batch 4、imgsz 320、24 张训练 / 6 张验证）
+
+两边都是从官方 COCO 权重热启动（`yolov8n.pt` / `yolo11n.pt` / `yolo26n.pt`，分类头按 3 类重建）。
+官方侧不是照 ultralytics 默认超参跑：一个一次性的 ultralytics 脚本（未入库）把超参按本实现的默认值改齐
+（AdamW、lr0 0.002、lrf 0.01、cos、warmup 3 epoch、`nbs=batch` 让 ultralytics 不放大 wd、
+box 7.5 / cls 0.5 / dfl 1.5、mosaic 0.5 且 `close_mosaic=0`、fliplr 0.5、translate 0.1、scale 0.5、
+hsv 0.015/0.7/0.4，其余增强全关），再用 raw 权重（不是 EMA）测 mAP。
+
+| mAP50-95 | 本实现 seed 20261124 | seed 20261125 | seed 20261126 | 均值 | 官方 seed 0 | seed 1 | 均值 |
+|---|---|---|---|---|---|---|---|
+| yolov8n | 0.9500 | 0.9458 | 0.9875 | 0.9611 | 0.9840 | 0.9075 | 0.9458 |
+| yolo11n | 0.9458 | 0.9229 | 0.9667 | 0.9451 | 0.9637 | 0.9564 | 0.9601 |
+| yolo26n | 0.9722 | 0.9250 | 0.9083 | 0.9352 | 0.9720 | 0.9371 | 0.9546 |
+
+mAP50 三家全是 1.000（本实现）/ 0.995（官方），已经饱和，看不出口径差别，所以只看 mAP50-95。
+
+**怎么读这张表**：6 张验证图，单张图框偏一点就够抖 0.03~0.06。本实现三个 seed 自身摆幅
+0.042（v8）/ 0.044（v11）/ 0.064（v26），官方两个 seed 是 0.077 / 0.007 / 0.035。三家均值差
+`+0.015 / -0.015 / -0.019`，**全部落在彼此的自摆幅之内**，没有系统性偏差。
+
+修衰减分组前后的对照（同一批 seed，只有这一处改动）：
+
+| 模型 | 修前 v11 均值 | 修后 v11 均值 | 官方均值 |
+|---|---|---|---|
+| yolo11n | 0.8986（0.9028 / 0.8944） | 0.9451（+0.047） | 0.9601 |
+
+也就是说 v11 原来那 0.06 的缺口，主体就是「BN/LN 和 bias 也在吃 5e-4 衰减」。
+
+### 已知差异（对齐后还剩的）
+
+1. **增强的随机流不同**。mosaic / 裁剪采样用的是各自的随机数序列，同 seed 也不会逐 step 一致，
+   所以 loss 曲线逐轮对比没有意义，只能比量级和收敛速度。表里 0.04~0.06 的自摆幅主要来自这里
+   （再加上验证集只有 6 张图）。
+2. **验证口径**：官方 `val` 默认用 EMA 权重，本实现导出的 best 是 raw 权重（best 按 fitness 选）。
+   上表的官方数字已经是 raw，两者口径才可比——拿官方的 EMA 数字来比会平白多出 0.01~0.03。
+3. 训练/验证都跑 CPU、单线程 DataLoader（官方 `workers=0`），吞吐不具可比性，这里只比精度。
+
 ## RF-DETR 预训练权重
 
 RF-DETR 从零训练时，前几轮 mAP 基本都是 0（24 张图、batch 4 时前几十轮就是 0），必须用官方

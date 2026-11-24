@@ -42,6 +42,19 @@ public interface ILoss
         Compute(prediction, target);
 }
 
+/// <summary>
+/// 需要在 epoch 边界调整自身状态的损失（例如 YOLO26 双头的 one-to-many / one-to-one 权重衰减）。
+/// <para>
+/// 训练器在每个 epoch 的所有批次跑完后调用一次，与日志节流无关；实现方自己决定如何用
+/// <paramref name="epoch"/> 与 <paramref name="totalEpochs"/> 换算进度。
+/// </para>
+/// </summary>
+public interface IEpochAwareLoss
+{
+    /// <summary>一个 epoch 结束时回调；<paramref name="epoch"/> 从 0 开始，<paramref name="totalEpochs"/> 是本次训练的总轮数。</summary>
+    void OnEpochEnd(int epoch, int totalEpochs);
+}
+
 /// <summary>均方误差（回归 / 冒烟测试）。</summary>
 public sealed class MeanSquaredError : ILoss
 {

@@ -11,6 +11,7 @@ using Label2Train.Train.Models.Yolo;
 using Label2Train.Train.Training;
 using Label2Train.Train.Training.Yolo;
 using TorchSharp;
+using TorchSharp.Modules;
 using static TorchSharp.torch;
 
 namespace Label2Train.Train.Runners;
@@ -124,7 +125,7 @@ public sealed class YoloDatasetTrainingRunner(
         Log(options, $"device: {DeviceFactory.DescribeDetailed(computeDevice)}");
         Log(options, $"output: {output}");
 
-        var optimizer = torch.optim.AdamW(model.parameters(), lr: options.LearningRate, weight_decay: 0.0005f);
+        (var optimizer, var decayOnly) = BuildOptimizer(model, options.LearningRate);
         ILoss loss = YoloEndToEndDetectionLoss.CreateFor(
             model, options.ImageSize, options.ImageSize, classCount, trackComponents: true);
 
@@ -149,7 +150,14 @@ public sealed class YoloDatasetTrainingRunner(
             model,
             optimizer,
             loss,
-            new TrainerOptions { Epochs = options.Epochs, GradientClipNorm = 10f, Shuffle = false },
+            new TrainerOptions
+            {
+                Epochs = options.Epochs,
+                GradientClipNorm = 10f,
+                Shuffle = false,
+                DecayOnlyParameters = decayOnly,
+                DecayOnlyWeightDecay = WeightDecay,
+            },
             new Rng(1),
             ema);
 
@@ -158,6 +166,8 @@ public sealed class YoloDatasetTrainingRunner(
             YoloPreprocessOptions.InferenceDefault(options.ImageSize));
 
         float bestMap50 = 0f;
+        float bestMap95 = 0f;
+        float bestFitness = float.NegativeInfinity;
         float lastMap50 = 0f;
         float lastMap95 = 0f;
         bool bestSaved = false;
@@ -198,11 +208,15 @@ public sealed class YoloDatasetTrainingRunner(
                         lastMap50 = map50;
                         lastMap95 = map95;
 
+                        float fitness = Fitness(map50, map95);
+
                         // 第一次评估就留一份 best：mAP 全为 0（随机初始化）时也要有可导出的权重。
-                        if (!bestSaved || map50 > bestMap50)
+                        if (!bestSaved || fitness > bestFitness)
                         {
                             bestSaved = true;
+                            bestFitness = fitness;
                             bestMap50 = map50;
+                            bestMap95 = map95;
                             Save("best.safetensors", metrics, map50, map95);
                         }
                     }
@@ -248,6 +262,8 @@ public sealed class YoloDatasetTrainingRunner(
         if (!bestSaved)
         {
             bestSaved = true;
+            bestMap50 = lastMap50;
+            bestMap95 = lastMap95;
             Save("best.safetensors", last, lastMap50, lastMap95);
         }
 
@@ -258,7 +274,7 @@ public sealed class YoloDatasetTrainingRunner(
             ema.Shadow,
             BuildMetadata(last, last.Loss, bestMap50, lastMap95, model, options.ImageSize, options.Device));
 
-        WriteReport(output, store, options, model, history, bestMap50);
+        WriteReport(output, store, options, model, history, bestMap50, bestMap95);
 
         Log(options, $"checkpoint: {Path.Combine(output, "model.safetensors")}");
         Log(options, $"report    : {Path.Combine(output, "train.json")}");
@@ -278,7 +294,7 @@ public sealed class YoloDatasetTrainingRunner(
             [])
         {
             BestMap50 = bestMap50,
-            BestMap50_95 = lastMap95,
+            BestMap50_95 = bestMap95,
             Architecture = model.Architecture,
         };
 
@@ -521,13 +537,64 @@ public sealed class YoloDatasetTrainingRunner(
         };
     }
 
+    /// <summary>
+    /// 选 best 的适应度：官方 <c>ultralytics.utils.metrics.DetMetrics.fitness</c> 为
+    /// <c>0.1 * mAP50 + 0.9 * mAP50-95</c>。
+    /// <para>
+    /// 不能只看 mAP50：6 张小验证集上 mAP50 第一轮就饱和到 1.0，按 mAP50 选会把早期那轮
+    /// （mAP50-95 还很低）当成 best 导出，和官方按 fitness 选的口径差 0.06 以上。
+    /// </para>
+    /// </summary>
+    private static float Fitness(float map50, float map95) => 0.1f * map50 + 0.9f * map95;
+
+    /// <summary>
+    /// 优化器 + 衰减分组，复现官方 <c>build_optimizer</c> 的口径。
+    /// <para>
+    /// 官方把参数分三组：名字含 <c>bias</c> 的、模块类型里带 <c>Norm</c> 的，weight_decay 为 0；
+    /// 其余（conv/linear 权重）吃 5e-4。这里按形状等价划分——conv/linear 权重是 2 维以上，
+    /// BN/LN 权重与 bias 都是 1 维，所以「≥2 维才衰减」与官方逐参数一致。
+    /// </para>
+    /// <para>
+    /// 实现方式：优化器按 <c>weight_decay: 0</c> 建，衰减由
+    /// <see cref="TrainerOptions.DecayOnlyParameters"/> 在每一步后补（TorchSharp 的
+    /// <c>ParamGroup</c> 不支持逐组 weight_decay）。
+    /// 设环境变量 <c>LABEL2TRAIN_WD_LEGACY=1</c> 退回旧行为：单组 AdamW，全部参数一起衰减。
+    /// </para>
+    /// </summary>
+    private static (OptimizerHelper Optimizer, IReadOnlyList<Parameter> DecayOnly) BuildOptimizer(
+        YoloDetectionModel model,
+        float learningRate)
+    {
+        if (Environment.GetEnvironmentVariable("LABEL2TRAIN_WD_LEGACY") == "1")
+        {
+            return (
+                torch.optim.AdamW(model.parameters(), lr: learningRate, weight_decay: WeightDecay),
+                Array.Empty<Parameter>());
+        }
+
+        var decay = new List<Parameter>();
+        foreach ((string name, Parameter parameter) in model.named_parameters())
+        {
+            if (name.Contains("bias", StringComparison.Ordinal) || parameter.dim() < 2)
+                continue;
+
+            decay.Add(parameter);
+        }
+
+        return (torch.optim.AdamW(model.parameters(), lr: learningRate, weight_decay: 0f), decay);
+    }
+
+    /// <summary>与官方同值的 weight decay。</summary>
+    private const float WeightDecay = 0.0005f;
+
     private static void WriteReport(
         string output,
         IDatasetStore store,
         TrainingRunOptions options,
         YoloDetectionModel model,
         IReadOnlyList<EpochMetrics> history,
-        float bestMap50)
+        float bestMap50,
+        float bestMap50_95)
     {
         var report = new
         {
@@ -541,6 +608,7 @@ public sealed class YoloDatasetTrainingRunner(
             imageSize = options.ImageSize,
             learningRate = options.LearningRate,
             bestMap50,
+            bestMap50_95 = bestMap50_95,
             history = history.Select(item => new
             {
                 item.Epoch,

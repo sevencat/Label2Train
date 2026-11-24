@@ -33,6 +33,22 @@ public sealed record TrainerOptions
     /// 见 <see cref="Trainer"/> 里 <c>ScaleGradients</c> 的说明。
     /// </summary>
     public Func<string, float>? GradientScale { get; init; }
+
+    /// <summary>
+    /// 只对这一批参数做「解耦 weight decay」（AdamW 口径：<c>p -= lr · wd · p</c>），其余参数完全不衰减。
+    /// <para>
+    /// 用途：ultralytics 的 <c>build_optimizer</c> 把参数分三组，BN/LN 权重与所有 bias 的
+    /// weight_decay 是 0、只有 conv/linear 权重吃 5e-4。TorchSharp 的 <c>ParamGroup</c> 不支持
+    /// 逐组 weight_decay，所以优化器本身按 <c>weight_decay: 0</c> 建，衰减由这里补。
+    /// </para>
+    /// <para>
+    /// null 或空集合表示不启用：优化器自己的 weight_decay 生效，行为与以前完全一致。
+    /// </para>
+    /// </summary>
+    public IReadOnlyList<Parameter>? DecayOnlyParameters { get; init; }
+
+    /// <summary>配合 <see cref="DecayOnlyParameters"/> 的衰减系数（官方默认 5e-4）。</summary>
+    public float DecayOnlyWeightDecay { get; init; }
 }
 
 /// <summary>单个 epoch 结束时的指标。</summary>
@@ -281,6 +297,10 @@ public sealed class Trainer
             var metrics = new EpochMetrics(epoch, Step, LastLoss, GetLearningRate());
             history.Add(metrics);
 
+            // 损失侧的 epoch 边界调整（YOLO26 双头权重衰减）：与日志节流解耦，每个 epoch 都必须调。
+            if (_loss is IEpochAwareLoss epochAware)
+                epochAware.OnEpochEnd(epoch, _options.Epochs);
+
             // 进度上报与日志节流解耦：UI 每轮都要刷新曲线，而控制台日志可以少打。
             progress?.Report(new TrainProgress(epoch, lastEpoch, Step, LastLoss, metrics.LearningRate));
 
@@ -338,6 +358,7 @@ public sealed class Trainer
             SetLearningRate(schedule.GetLearningRate(Step));
 
         _optimizer.step();
+        ApplyDecoupledWeightDecay();
         _ema?.Update(_model);
         Step++;
 
@@ -383,6 +404,31 @@ public sealed class Trainer
     {
         foreach (ParamGroup group in _optimizer.ParamGroups)
             group.LearningRate = learningRate;
+    }
+
+    /// <summary>
+    /// 解耦 weight decay（AdamW 口径）：<c>p *= 1 - lr · wd</c>，只作用于
+    /// <see cref="TrainerOptions.DecayOnlyParameters"/>，用的学习率就是本步刚设进去的那个。
+    /// <para>
+    /// 和 <c>torch.optim.AdamW</c> 内部做的事逐位等价（同样在参数更新之后乘、同样用当步 lr），
+    /// 只是把「哪些参数吃衰减」交给调用方决定——用来复现官方的 BN/bias 零衰减分组。
+    /// 没有配置参数时整段跳过，老路径行为不变。
+    /// </para>
+    /// </summary>
+    private void ApplyDecoupledWeightDecay()
+    {
+        if (_options.DecayOnlyParameters is not { Count: > 0 } parameters
+            || _options.DecayOnlyWeightDecay <= 0f)
+        {
+            return;
+        }
+
+        double factor = 1.0 - (GetLearningRate() * _options.DecayOnlyWeightDecay);
+        using (torch.no_grad())
+        {
+            foreach (Parameter parameter in parameters)
+                parameter.mul_(factor);
+        }
     }
 
     /// <summary>

@@ -16,8 +16,14 @@ public sealed record YoloLossOptions
     /// <summary>DFL 损失权重（<c>reg_max = 1</c> 时这一项是 L1，权重仍用它，与官方一致）。</summary>
     public float DflWeight { get; init; } = 1.5f;
 
-    /// <summary>TAL 的 top-k 锚点数。</summary>
-    public int TopK { get; init; } = 13;
+    /// <summary>TAL 的 top-k 锚点数（ultralytics 8.4 的 <c>tal_topk</c> 默认 10）。</summary>
+    public int TopK { get; init; } = 10;
+
+    /// <summary>
+    /// TAL 的二次筛选 top-k（ultralytics 8.4 的 <c>tal_topk2</c>）。
+    /// 0（默认）表示与 <see cref="TopK"/> 相同、不做二次筛选；YOLO26 的 one-to-one 分支用 1。
+    /// </summary>
+    public int TopK2 { get; init; }
 
     /// <summary>TAL 分类分数指数。</summary>
     public float Alpha { get; init; } = 0.5f;
@@ -84,7 +90,12 @@ public sealed class YoloDetectionLoss : ILoss
         _classCount = classCount;
         _regressionMax = regressionMax;
         _options = options ?? new YoloLossOptions();
-        _assigner = new TaskAlignedAssigner(classCount, _options.TopK, _options.Alpha, _options.Beta);
+        _assigner = new TaskAlignedAssigner(
+            classCount,
+            _options.TopK,
+            _options.Alpha,
+            _options.Beta,
+            _options.TopK2 > 0 ? _options.TopK2 : null);
         ConfigureImageSize(imageWidth, imageHeight);
     }
 
@@ -122,6 +133,21 @@ public sealed class YoloDetectionLoss : ILoss
 
     /// <summary>最近一次 <see cref="Compute"/> 的分项（<see cref="TrackComponents"/> 关闭时保持 0）。</summary>
     public YoloLossParts LastParts { get; private set; } = new(0f, 0f, 0f, 0f);
+
+    /// <summary>
+    /// 是否记录 TAL 分配统计（<see cref="LastForegroundCount"/> 等）。会同步设备，
+    /// 只在数值对拍 / 排查「分配塌缩」时打开，训练循环不要开。
+    /// </summary>
+    public bool CaptureAssignmentStats { get; set; }
+
+    /// <summary>最近一次分配的前景锚点数（<see cref="CaptureAssignmentStats"/> 打开时更新）。</summary>
+    public int LastForegroundCount { get; private set; }
+
+    /// <summary>最近一次分配的目标分数总和（权重和；分配塌缩时它会骤降）。</summary>
+    public float LastTargetScoreSum { get; private set; }
+
+    /// <summary>最近一次分配的前 40 个前景锚点（展平后的索引，跨图连续编号）。</summary>
+    public IReadOnlyList<int> LastForegroundPositions { get; private set; } = Array.Empty<int>();
 
     /// <inheritdoc />
     public Tensor Compute(Tensor prediction, Tensor target)
@@ -210,6 +236,18 @@ public sealed class YoloDetectionLoss : ILoss
             gtMask);
 
         Tensor targetScoresSum = assignment.TargetScores.sum().clamp(min: 1f);
+
+        if (CaptureAssignmentStats)
+        {
+            LastForegroundCount = (int)assignment.Foreground.sum().item<long>();
+            LastTargetScoreSum = TorchInterop.ToScalar(assignment.TargetScores.sum());
+
+            Tensor flat = assignment.Foreground.view(-1).nonzero().squeeze(1);
+            long count = Math.Min(40, flat.shape[0]);
+            LastForegroundPositions = count == 0
+                ? Array.Empty<int>()
+                : flat.narrow(0, 0, count).to(ScalarType.Int32).cpu().data<int>().ToArray();
+        }
 
         Tensor classLoss = torch.nn.functional.binary_cross_entropy_with_logits(
             classRaw,
