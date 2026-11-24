@@ -21,14 +21,20 @@ public enum YoloScale
     X,
 }
 
-/// <summary>YOLO 模型家族：v8 与 v11 的层级结构 / 缩放系数 / 头部卷积都不同。</summary>
+/// <summary>YOLO 模型家族：v8 / v11 / v26 的层级结构、缩放系数、检测头都不同。</summary>
 public enum YoloModelFamily
 {
-    /// <summary>YOLOv8（C2f + 常规 3×3 检测头）。</summary>
+    /// <summary>YOLOv8（C2f + 常规 3×3 检测头，DFL 16 bins）。</summary>
     V8,
 
-    /// <summary>YOLOv11（C3k2 + C2PSA + 深度可分离分类头）。</summary>
+    /// <summary>YOLOv11（C3k2 + C2PSA + 深度可分离分类头，DFL 16 bins）。</summary>
     V11,
+
+    /// <summary>
+    /// YOLOv26（主干同 v11，P5 特征再加 PSA 注意力；检测头去掉 DFL、
+    /// 同时输出 one-to-many 与 one-to-one 两套分支，推理不需要 NMS）。
+    /// </summary>
+    V26,
 }
 
 /// <summary>
@@ -45,6 +51,9 @@ public static class YoloScales
 
     /// <summary>YOLOv11 的 architecture 前缀。</summary>
     public const string V11Prefix = "yolo11";
+
+    /// <summary>YOLOv26 的 architecture 前缀。</summary>
+    public const string V26Prefix = "yolo26";
 
     /// <summary>取规模的官方字母（n / s / m / l / x）。</summary>
     public static char ToLetter(YoloScale scale) => scale switch
@@ -74,7 +83,7 @@ public static class YoloScales
         };
     }
 
-    /// <summary>取缩放系数；v8 与 v11 的 depth / width / max_channels 表不同，必须按家族查。</summary>
+    /// <summary>取缩放系数；各家族的 depth / width / max_channels 表不同，必须按家族查。</summary>
     public static YoloScaleConfig Config(YoloModelFamily family, YoloScale scale) => family switch
     {
         YoloModelFamily.V8 => scale switch
@@ -86,14 +95,15 @@ public static class YoloScales
             YoloScale.X => new YoloScaleConfig(1.00, 1.25, 1024),
             _ => throw new ArgumentOutOfRangeException(nameof(scale), scale, "未知的 YOLOv8 规模。"),
         },
-        YoloModelFamily.V11 => scale switch
+        // v26 的 scales 与 yolo11.yaml 逐行相同（官方 yolo26.yaml 注释里的参数量可对照）
+        YoloModelFamily.V11 or YoloModelFamily.V26 => scale switch
         {
             YoloScale.N => new YoloScaleConfig(0.50, 0.25, 1024),
             YoloScale.S => new YoloScaleConfig(0.50, 0.50, 1024),
             YoloScale.M => new YoloScaleConfig(0.50, 1.00, 512),
             YoloScale.L => new YoloScaleConfig(1.00, 1.00, 512),
             YoloScale.X => new YoloScaleConfig(1.00, 1.50, 512),
-            _ => throw new ArgumentOutOfRangeException(nameof(scale), scale, "未知的 YOLOv11 规模。"),
+            _ => throw new ArgumentOutOfRangeException(nameof(scale), scale, "未知的 YOLOv11 / v26 规模。"),
         },
         _ => throw new ArgumentOutOfRangeException(nameof(family), family, "未知的 YOLO 家族。"),
     };
@@ -103,10 +113,14 @@ public static class YoloScales
     {
         YoloModelFamily.V8 => V8Prefix,
         YoloModelFamily.V11 => V11Prefix,
+        YoloModelFamily.V26 => V26Prefix,
         _ => throw new ArgumentOutOfRangeException(nameof(family), family, "未知的 YOLO 家族。"),
     };
 
-    /// <summary>解析家族（<c>yolov8</c> / <c>v8</c> / <c>yolo11</c> / <c>yolov11</c> / <c>v11</c>）。</summary>
+    /// <summary>
+    /// 解析家族（<c>v8</c> / <c>yolov8</c> / <c>yolo8</c> / <c>v11</c> / <c>yolo11</c> /
+    /// <c>yolov11</c> / <c>v26</c> / <c>yolo26</c> / <c>yolov26</c>）。
+    /// </summary>
     public static YoloModelFamily ParseFamily(string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
@@ -115,8 +129,9 @@ public static class YoloScales
         {
             "v8" or "yolov8" or "yolo8" => YoloModelFamily.V8,
             "v11" or "yolo11" or "yolov11" => YoloModelFamily.V11,
+            "v26" or "yolo26" or "yolov26" => YoloModelFamily.V26,
             _ => throw new ArgumentException(
-                $"未知的 YOLO 家族 '{value}'；可选 v8 / v11。", nameof(value)),
+                $"未知的 YOLO 家族 '{value}'；可选 v8 / v11 / v26。", nameof(value)),
         };
     }
 

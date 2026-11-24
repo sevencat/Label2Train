@@ -51,6 +51,7 @@ public sealed class TrainingExportService
     private const string SimpleDetrPrefix = "simple-detr";
     private const string V8Prefix = "yolov8";
     private const string V11Prefix = "yolo11";
+    private const string V26Prefix = "yolo26";
 
     /// <summary>
     /// 架构 → 导出文件名前缀：<c>yolov8*</c>→<c>yolov8</c>、<c>yolo11*</c>→<c>yolov11</c>、
@@ -59,6 +60,11 @@ public sealed class TrainingExportService
     public static string PrefixFor(string architecture)
     {
         string text = (architecture ?? string.Empty).Trim();
+
+        if (text.StartsWith(V26Prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return "yolo26";
+        }
 
         if (text.StartsWith(V11Prefix, StringComparison.OrdinalIgnoreCase))
         {
@@ -152,13 +158,20 @@ public sealed class TrainingExportService
         {
             (YoloModelFamily family, YoloScale scale, int classCount) = YoloArchitectures.Parse(architecture);
 
+            bool nmsFree = false;
+
             if (exportOnnx)
             {
                 onnx = Path.Combine(targetDirectory, onnxName);
 
                 using YoloDetectionModel model = YoloArchitectures.CreateFromArchitecture(device, architecture);
                 checkpoint.LoadInto(model, device, strict: false);
-                YoloOnnxExporter.Save(model, onnx, imageHeight: imageSize, imageWidth: imageSize);
+
+                // YOLO26 带 one-to-one 分支，按官方默认导出成无 NMS 的 [1, 300, 6]；
+                // 其余家族仍是 [1, 4+nc, anchors] + 外部 NMS。
+                nmsFree = model.Head.UsesEndToEnd;
+                YoloOnnxExporter.Save(
+                    model, onnx, imageHeight: imageSize, imageWidth: imageSize, endToEnd: nmsFree);
             }
 
             WriteYoloConfig(
@@ -170,7 +183,8 @@ public sealed class TrainingExportService
                 imageSize,
                 classNames,
                 checkpoint.Metadata,
-                onnx is null ? null : onnxName);
+                onnx is null ? null : onnxName,
+                nmsFree);
         }
         else if (TryParseDetr(architecture, out bool useRfDetr, out int classCount))
         {
@@ -266,7 +280,8 @@ public sealed class TrainingExportService
         int imageSize,
         IReadOnlyList<string> classNames,
         IReadOnlyDictionary<string, string> metadata,
-        string? onnxFileName)
+        string? onnxFileName,
+        bool nmsFree)
     {
         // Utf8JsonWriter 直接写：不依赖反射 / 源生成，AOT 或禁用反射的环境同样能导出
         using FileStream stream = File.Create(path);
@@ -275,7 +290,12 @@ public sealed class TrainingExportService
         writer.WriteStartObject();
         writer.WriteString("format", "sevencat-model/1");
         writer.WriteString("architecture", architecture);
-        writer.WriteString("family", family == YoloModelFamily.V11 ? "yolov11" : "yolov8");
+        writer.WriteString("family", family switch
+        {
+            YoloModelFamily.V26 => "yolo26",
+            YoloModelFamily.V11 => "yolov11",
+            _ => "yolov8",
+        });
         writer.WriteString("scale", YoloScales.ToLetter(scale).ToString());
         writer.WriteString("task", "detect");
         writer.WriteNumber("classCount", classCount);
@@ -291,8 +311,19 @@ public sealed class TrainingExportService
         writer.WriteString("name", "output0");
         writer.WriteStartArray("shape");
         writer.WriteNumberValue(1);
-        writer.WriteNumberValue(4 + classCount);
-        writer.WriteStringValue("anchors");
+
+        if (nmsFree)
+        {
+            // 无 NMS 导出：[1, K, 6]，每行 x1、y1、x2、y2、score、class
+            writer.WriteNumberValue(YoloOnnxExporter.DefaultEndToEndDetections);
+            writer.WriteNumberValue(6);
+        }
+        else
+        {
+            writer.WriteNumberValue(4 + classCount);
+            writer.WriteStringValue("anchors");
+        }
+
         writer.WriteEndArray();
         writer.WriteEndObject();
 

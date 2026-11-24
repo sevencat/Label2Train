@@ -14,6 +14,18 @@ public static class YoloArchitectures
     /// <summary>任务段（目前只有 detect）。</summary>
     public const string DetectTask = "detect";
 
+    /// <summary>已注册的家族前缀（顺序即匹配顺序，长的放前面避免前缀互相吃掉）。</summary>
+    private static readonly (string Prefix, YoloModelFamily Family)[] FamilyPrefixes =
+    [
+        (YoloScales.V8Prefix, YoloModelFamily.V8),
+        (YoloScales.V11Prefix, YoloModelFamily.V11),
+        (YoloScales.V26Prefix, YoloModelFamily.V26),
+    ];
+
+    /// <summary>当前支持的全部家族（界面下拉 / 文档用）。</summary>
+    public static IReadOnlyList<YoloModelFamily> SupportedFamilies { get; } =
+        [.. FamilyPrefixes.Select(item => item.Family)];
+
     /// <summary>生成 architecture 字符串。</summary>
     public static string Format(YoloModelFamily family, YoloScale scale, int classCount)
     {
@@ -65,29 +77,16 @@ public static class YoloArchitectures
         if (string.IsNullOrWhiteSpace(architecture))
             return false;
 
-        string text = architecture.Trim();
-
-        if (text.StartsWith(YoloScales.V8Prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            family = YoloModelFamily.V8;
-            return true;
-        }
-
-        if (text.StartsWith(YoloScales.V11Prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            family = YoloModelFamily.V11;
-            return true;
-        }
-
-        return false;
+        return TryMatchPrefix(architecture.Trim(), out family, out _);
     }
 
-    /// <summary>按家族分派到 <see cref="YoloV8.Create"/> 或 <see cref="YoloV11.Create"/>。</summary>
+    /// <summary>按家族分派到对应工厂（v8 / v11 / v26）。</summary>
     public static YoloDetectionModel Create(Device device, YoloModelFamily family, YoloScale scale, int classCount) =>
         family switch
         {
             YoloModelFamily.V8 => YoloV8.Create(device, scale, classCount),
             YoloModelFamily.V11 => YoloV11.Create(device, scale, classCount),
+            YoloModelFamily.V26 => YoloV26.Create(device, scale, classCount),
             _ => throw new ArgumentOutOfRangeException(nameof(family), family, "未知的 YOLO 家族。"),
         };
 
@@ -120,21 +119,31 @@ public static class YoloArchitectures
         return rows;
     }
 
+    private static bool TryMatchPrefix(
+        string text, out YoloModelFamily family, out int prefixLength)
+    {
+        foreach ((string prefix, YoloModelFamily candidate) in FamilyPrefixes)
+        {
+            if (text.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                family = candidate;
+                prefixLength = prefix.Length;
+                return true;
+            }
+        }
+
+        family = default;
+        prefixLength = 0;
+        return false;
+    }
+
     private static YoloModelFamily DetectFamily(string architecture, out int prefixLength)
     {
-        if (architecture.StartsWith(YoloScales.V8Prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            prefixLength = YoloScales.V8Prefix.Length;
-            return YoloModelFamily.V8;
-        }
+        if (TryMatchPrefix(architecture, out YoloModelFamily family, out prefixLength))
+            return family;
 
-        if (architecture.StartsWith(YoloScales.V11Prefix, StringComparison.OrdinalIgnoreCase))
-        {
-            prefixLength = YoloScales.V11Prefix.Length;
-            return YoloModelFamily.V11;
-        }
-
+        string supported = string.Join(" / ", FamilyPrefixes.Select(item => $"{item.Prefix}*"));
         throw new NotSupportedException(
-            $"architecture '{architecture}' 不是已知的 YOLO 家族（支持 {YoloScales.V8Prefix}* / {YoloScales.V11Prefix}*）。");
+            $"architecture '{architecture}' 不是已知的 YOLO 家族（支持 {supported}）。");
     }
 }

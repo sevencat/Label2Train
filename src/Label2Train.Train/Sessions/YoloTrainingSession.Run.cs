@@ -38,7 +38,7 @@ public sealed partial class YoloTrainingSession
         YoloDetectionModel model = YoloArchitectures.Create(device, family, scale, classCount);
 
         // 分类 bias 先验按真实输入尺寸设一次（创建时按 640 设过）。
-        model.Head.ApplyClassBiasPrior(options.ImageSize);
+        model.Head.ApplyBiasPrior(options.ImageSize);
 
         log?.Invoke($"data  : {options.Descriptor} · {trainSet.Samples.Count} 张 · {classCount} 类");
         log?.Invoke($"val   : {(validationSet is null ? "(无验证集)" : $"{validationSet.Samples.Count} 张")}");
@@ -47,7 +47,8 @@ public sealed partial class YoloTrainingSession
         log?.Invoke($"output: {output}");
 
         var optimizer = torch.optim.AdamW(model.parameters(), lr: options.LearningRate, weight_decay: 0.0005f);
-        var loss = new YoloDetectionLoss(options.ImageSize, options.ImageSize, classCount) { TrackComponents = true };
+        ILoss loss = YoloEndToEndDetectionLoss.CreateFor(
+            model, options.ImageSize, options.ImageSize, classCount, trackComponents: true);
 
         int batchesPerEpoch = Math.Max(1, (trainSet.Samples.Count + options.BatchSize - 1) / options.BatchSize);
         int totalSteps = (options.Epochs * batchesPerEpoch) + 1;

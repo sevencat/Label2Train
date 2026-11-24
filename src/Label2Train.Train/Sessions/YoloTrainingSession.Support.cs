@@ -53,7 +53,7 @@ public sealed partial class YoloTrainingSession
                         options.ImageSize,
                         options.ImageSize,
                         classCount,
-                        DetectHeadModule.DefaultRegressionMax,
+                        model.Head.RegressionMax,
                         options.Confidence,
                         options.IouThreshold));
 

@@ -91,11 +91,12 @@ public partial class TrainViewModel : ObservableObject
     [ObservableProperty]
     private decimal _queries = TrainingPresets.DetrQueries;
 
-    /// <summary>训练成哪个家族：YOLOv8 / YOLOv11 / RF-DETR。</summary>
+    /// <summary>训练成哪个家族：YOLOv8 / YOLOv11 / YOLO26 / RF-DETR。</summary>
     public IReadOnlyList<ModelOption> ModelFamilies { get; } =
     [
         new ModelOption("v8", "YOLOv8"),
         new ModelOption("v11", "YOLOv11"),
+        new ModelOption("v26", "YOLO26"),
         new ModelOption("rfdetr", "RF-DETR"),
     ];
 
@@ -722,6 +723,7 @@ public partial class TrainViewModel : ObservableObject
             string family = SelectedModel?.Id switch
             {
                 "v11" => "yolov11",
+                "v26" => "yolo26",
                 "rfdetr" => "rfdetr",
                 _ => "yolov8",
             };

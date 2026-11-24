@@ -6,11 +6,13 @@ using static TorchSharp.torch.nn;
 namespace Label2Train.Train.Models.Yolo;
 
 /// <summary>
-/// ultralytics 的 <c>C3k2</c>（YOLOv11 的主干 / 颈部基础块）：结构与 <see cref="C2fModule"/> 一致
+/// ultralytics 的 <c>C3k2</c>（YOLOv11 / v26 的主干 / 颈部基础块）：结构与 <see cref="C2fModule"/> 一致
 /// （cv1 拆两半、后一半串 <c>m</c> 个块、全部拼接后 cv2 融合），差别在内层块：
 /// <list type="bullet">
 /// <item><c>c3k=false</c>（yolo11.yaml 的默认）→ <c>Bottleneck(c, c, shortcut, g)</c>，隐藏通道再折半；</item>
-/// <item><c>c3k=true</c> → <see cref="C3kModule"/>（内含 2 个 Bottleneck）。</item>
+/// <item><c>c3k=true</c> → <see cref="C3kModule"/>（内含 2 个 Bottleneck）；</item>
+/// <item><c>attention=true</c> → <c>Sequential(Bottleneck, PSABlock)</c>（YOLO26 的 P5 层，
+/// 优先级高于 <c>c3k</c>，与官方 <c>if attn else C3k if c3k else Bottleneck</c> 一致）。</item>
 /// </list>
 /// </summary>
 public sealed class C3k2Module : Module<Tensor, Tensor>
@@ -28,7 +30,8 @@ public sealed class C3k2Module : Module<Tensor, Tensor>
         bool c3k = false,
         double expansion = 0.5,
         bool shortcut = true,
-        Device? device = null)
+        Device? device = null,
+        bool attention = false)
         : base("C3k2")
     {
         if (inputChannels <= 0 || outputChannels <= 0)
@@ -41,6 +44,7 @@ public sealed class C3k2Module : Module<Tensor, Tensor>
         int hiddenChannels = (int)(outputChannels * expansion);
         HiddenChannels = hiddenChannels;
         UsesC3kBlocks = c3k;
+        UsesAttentionBlocks = attention;
 
         cv1 = new ConvModule(inputChannels, 2 * hiddenChannels, 1, 1, device);
         cv2 = new ConvModule((2 + repeats) * hiddenChannels, outputChannels, 1, 1, device);
@@ -50,9 +54,14 @@ public sealed class C3k2Module : Module<Tensor, Tensor>
 
         for (int index = 0; index < repeats; index++)
         {
-            _blocks[index] = c3k
-                ? new C3kModule(hiddenChannels, hiddenChannels, 2, shortcut, 0.5, device)
-                : new BottleneckModule(hiddenChannels, hiddenChannels, shortcut, 0.5, device);
+            _blocks[index] = attention
+                ? new YoloSequential(
+                    "Sequential",
+                    ("0", new BottleneckModule(hiddenChannels, hiddenChannels, shortcut, 0.5, device)),
+                    ("1", new PsaBlockModule(hiddenChannels, true, device)))
+                : c3k
+                    ? new C3kModule(hiddenChannels, hiddenChannels, 2, shortcut, 0.5, device)
+                    : new BottleneckModule(hiddenChannels, hiddenChannels, shortcut, 0.5, device);
 
             m.Add(_blocks[index]);
         }
@@ -67,6 +76,9 @@ public sealed class C3k2Module : Module<Tensor, Tensor>
 
     /// <summary>内层块是否为 <see cref="C3kModule"/>（否则是单个 Bottleneck）。</summary>
     public bool UsesC3kBlocks { get; }
+
+    /// <summary>内层块是否为 Bottleneck + PSABlock 的组合（YOLO26 的 P5 层）。</summary>
+    public bool UsesAttentionBlocks { get; }
 
     /// <summary>输入卷积（导出 ONNX 时按层展开）。</summary>
     public ConvModule Cv1 => (ConvModule)cv1;

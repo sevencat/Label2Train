@@ -59,12 +59,21 @@ internal static class BboxOps
         },
         -1);
 
-    /// <summary>把 xyxy 框转成相对锚点的 <c>ltrb</c> 距离，并夹到 <c>[0, regressionMax]</c>。</summary>
-    public static Tensor Bbox2Dist(Tensor anchor, Tensor box, float regressionMax) => torch.cat(
-        new[]
-        {
-            anchor - box.narrow(-1, 0, 2),
-            box.narrow(-1, 2, 2) - anchor,
-        },
-        -1).clamp(min: 0, max: regressionMax);
+    /// <summary>
+    /// 把 xyxy 框转成相对锚点的 <c>ltrb</c> 距离。
+    /// <paramref name="regressionMax"/> 给了就夹到 <c>[0, regressionMax]</c>（DFL 需要），
+    /// 不给则原样返回（官方 <c>bbox2dist(reg_max=None)</c>，YOLO26 的 L1 分支用）。
+    /// </summary>
+    public static Tensor Bbox2Dist(Tensor anchor, Tensor box, float? regressionMax = null)
+    {
+        Tensor distance = torch.cat(
+            new[]
+            {
+                anchor - box.narrow(-1, 0, 2),
+                box.narrow(-1, 2, 2) - anchor,
+            },
+            -1);
+
+        return regressionMax is float max ? distance.clamp(min: 0, max: max) : distance;
+    }
 }

@@ -67,6 +67,7 @@ public class TrainExportTests
     [InlineData("yolov8n-detect-2", "yolov8_n")]
     [InlineData("yolov8s-detect-2", "yolov8_s")]
     [InlineData("yolo11m-detect-2", "yolov11_m")]
+    [InlineData("yolo26n-detect-2", "yolo26_n")]
     [InlineData("rfdetr-detect-2", "rfdetr")]
     [InlineData("simple-detr-detect-2", "simple-detr")]
     public void Export_Prefix_Follows_Architecture(string architecture, string expected)
@@ -199,6 +200,9 @@ public class TrainExportTests
 
         train.SelectedModel = train.ModelFamilies.Single(model => model.Id == "v11");
         Assert.Equal(Path.Combine(models, "yolov11_s"), train.OutputDirectory);
+
+        train.SelectedModel = train.ModelFamilies.Single(model => model.Id == "v26");
+        Assert.Equal(Path.Combine(models, "yolo26_s"), train.OutputDirectory);
     }
 
     [AvaloniaFact]
@@ -235,20 +239,53 @@ public class TrainExportTests
         Assert.Contains(project.Name, train.Status, StringComparison.Ordinal);
     }
 
+    /// <summary>
+    /// YOLO26 的导出按官方默认走无 NMS：ONNX 输出 <c>[1, 300, 6]</c>，<c>.json</c> 里的 output.shape 也要跟着变，
+    /// 免得下游按「4+类别数」去解读。
+    /// </summary>
+    [AvaloniaFact]
+    public async Task Export_Yolo26_Writes_NmsFree_Onnx()
+    {
+        await using AppTestHost host = AppTestHost.Create();
+        (TrainViewModel train, _) = await OpenSyntheticProjectAsync(host);
+
+        train.OutputDirectory = SeedRun(host.Root, "yolo26n-detect-2");
+
+        Assert.True(await train.ExportAsync(withOnnx: true));
+
+        string onnx = Path.Combine(train.ExportDirectory, "yolo26_n.onnx");
+        Assert.True(File.Exists(onnx));
+
+        using var document = System.Text.Json.JsonDocument.Parse(
+            File.ReadAllText(Path.Combine(train.ExportDirectory, "yolo26_n.json")));
+        string[] shape = document.RootElement
+            .GetProperty("output")
+            .GetProperty("shape")
+            .EnumerateArray()
+            .Select(value => value.ToString())
+            .ToArray();
+        Assert.Equal(["1", "300", "6"], shape);
+
+        // 无 NMS 图能在检测端跑通（端到端布局由输出形状自动识别）
+        using var runner = new Label2Train.Core.AutoLabel.YoloOnnxRunner(onnx);
+        Assert.NotNull(runner.Predict(new byte[640 * 640 * 4], 640, 640, new Label2Train.Core.AutoLabel.AutoLabelOptions(onnx, 0.25, ClassNames: null)));
+    }
+
     /// <summary>造一个「已经训练过」的输出目录：有元数据齐全的 best.safetensors 才有东西可导。</summary>
-    private static string SeedRun(string root)
+    private static string SeedRun(string root, string? architecture = null)
     {
         string run = Path.Combine(root, "runs");
         Directory.CreateDirectory(run);
 
-        using YoloDetectionModel model = YoloArchitectures.CreateFromArchitecture(torch.CPU, Architecture);
+        string target = architecture ?? Architecture;
+        using YoloDetectionModel model = YoloArchitectures.CreateFromArchitecture(torch.CPU, target);
 
         Checkpoint.Save(
             Path.Combine(run, TrainingExportService.WeightsFileName),
             model,
             new Dictionary<string, string>(StringComparer.Ordinal)
             {
-                ["architecture"] = Architecture,
+                ["architecture"] = target,
                 ["classes"] = "2",
                 ["image_size"] = "640",
             });

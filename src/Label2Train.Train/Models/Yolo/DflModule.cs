@@ -53,7 +53,15 @@ public sealed class DflModule : Module<Tensor, Tensor>
     /// <summary>reg_max（每个方向上的离散区间数）。</summary>
     public int RegressionMax => _regressionMax;
 
-    /// <summary>输入 <c>[B, 4*reg_max, N]</c>，输出 <c>[B, 4, N]</c> 的连续距离。</summary>
+    /// <summary>
+    /// 输入 <c>[B, 4*reg_max, N]</c>，输出 <c>[B, 4, N]</c> 的连续距离。
+    /// <para>
+    /// 通道布局必须与 ultralytics 的 <c>DFL.forward</c> 一致：
+    /// <c>x.view(b, 4, reg_max, a)</c>，即 <b>4 个方向在外、16 个 bin 在内</b>
+    /// （第 <c>i</c> 个通道对应 <c>side = i / reg_max</c>、<c>bin = i % reg_max</c>）。
+    /// 写成 <c>[reg_max, 4]</c> 虽然形状相同、自己训练也能收敛，但官方权重的框会整体错位。
+    /// </para>
+    /// </summary>
     public override Tensor forward(Tensor input)
     {
         ArgumentNullException.ThrowIfNull(input);

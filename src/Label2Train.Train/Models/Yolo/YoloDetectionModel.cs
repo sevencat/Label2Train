@@ -73,6 +73,26 @@ public abstract class YoloDetectionModel : Module<Tensor, Tensor>
     /// <summary>每层的输入来源（<c>-1</c> = 上一层，非负 = 该层号），ONNX 导出按它连边。</summary>
     public IReadOnlyList<IReadOnlyList<int>> InputSources => _model.InputSources;
 
+    /// <summary>
+    /// 从逐层输出里取检测头的三个尺度输入（one-to-one 分支与损失都要用）。
+    /// 索引语义与 <see cref="YoloModuleChain"/> 一致：<c>-1</c> 表示上一层。
+    /// </summary>
+    public Tensor[] ResolveHeadInputs(IReadOnlyList<Tensor> trace)
+    {
+        ArgumentNullException.ThrowIfNull(trace);
+
+        IReadOnlyList<int> sources = _model.InputSources[^1];
+        var features = new Tensor[sources.Count];
+
+        for (int index = 0; index < sources.Count; index++)
+        {
+            int source = sources[index];
+            features[index] = source == -1 ? trace[trace.Count - 1] : trace[source];
+        }
+
+        return features;
+    }
+
     /// <summary>按输入尺寸算三个尺度的锚点数量，供损失按尺度拆分原始预测。</summary>
     public (int Small, int Medium, int Large, int Anchors) FeatureSizes(int inputHeight, int inputWidth)
     {

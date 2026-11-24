@@ -13,7 +13,7 @@ public sealed record YoloLossOptions
     /// <summary>分类（BCE）损失权重。</summary>
     public float ClassWeight { get; init; } = 0.5f;
 
-    /// <summary>DFL 损失权重。</summary>
+    /// <summary>DFL 损失权重（<c>reg_max = 1</c> 时这一项是 L1，权重仍用它，与官方一致）。</summary>
     public float DflWeight { get; init; } = 1.5f;
 
     /// <summary>TAL 的 top-k 锚点数。</summary>
@@ -33,11 +33,15 @@ public sealed record YoloLossOptions
 public sealed record YoloLossParts(float Box, float Class, float Dfl, float Total);
 
 /// <summary>
-/// YOLOv8 检测损失：TAL 分配 + box(CIoU) / cls(BCE) / dfl 三项。
+/// YOLO 检测损失：TAL 分配 + box(CIoU) / cls(BCE) / dfl 三项。
 /// <para>
 /// 输入 <c>prediction</c> 是模型原始输出 <c>[B, 4*reg_max + nc, N]</c>，
 /// <c>target</c> 是 <c>[B, M, 6]</c>（<c>valid, class, x1, y1, x2, y2</c>，像素坐标）。
 /// 锚点顺序必须与检测头一致：P3 → P4 → P5，每层按行优先展平。
+/// </para>
+/// <para>
+/// 第三项按 <c>reg_max</c> 分两种：<c>reg_max &gt; 1</c> 是 DFL 交叉熵；<c>reg_max = 1</c>（YOLO26，
+/// 检测头没有 DFL）时官方退化成 L1——距离乘 stride 换成像素、按图像宽高归一化后取 4 方向均值。
 /// </para>
 /// <para>
 /// 三个分项都按「本次 batch 的目标分数总和」归一化；<see cref="YoloLossOptions.ScaleByBatchSize"/>
@@ -177,8 +181,18 @@ public sealed class YoloDetectionLoss : ILoss
         Tensor boxRaw = prediction.narrow(1, 0, 4 * _regressionMax).transpose(1, 2).contiguous();
         Tensor classRaw = prediction.narrow(1, 4 * _regressionMax, _classCount).transpose(1, 2).contiguous();
 
-        Tensor distribution = boxRaw.view(batch, anchors, 4, _regressionMax).softmax(3);
-        Tensor ltrb = (distribution * _projection!).sum(3);
+        // 与 ultralytics 的 DFL 一致：每锚点的 64 通道是 [4, reg_max]（方向在外、bin 在内）。
+        // reg_max = 1（YOLO26）时官方不建 DFL，框分支的 4 个通道直接就是 stride 单位的距离。
+        Tensor ltrb;
+        if (_regressionMax == 1)
+        {
+            ltrb = boxRaw;
+        }
+        else
+        {
+            Tensor distribution = boxRaw.view(batch, anchors, 4, _regressionMax).softmax(3);
+            ltrb = (distribution * _projection!).sum(3);
+        }
 
         Tensor predictedStride = BboxOps.Dist2Bbox(ltrb, _anchorCells!);
         Tensor predictedPixels = predictedStride * _strides!;
@@ -237,10 +251,29 @@ public sealed class YoloDetectionLoss : ILoss
             boxLoss = ((1f - iou).unsqueeze(1) * weights).sum() / targetScoresSum;
 
             Tensor predictionDist = boxRaw.view(-1, 4 * _regressionMax).index_select(0, indices);
-            Tensor targetDist = BboxOps.Bbox2Dist(anchorValues, normalizedTargets, _regressionMax - 1);
 
-            Tensor dflRows = DflLoss(predictionDist, targetDist, indices.shape[0]);
-            dflLoss = (dflRows.mean(new long[] { 1 }, true) * weights).sum() / targetScoresSum;
+            if (_regressionMax == 1)
+            {
+                // 官方 reg_max = 1 时 DFL 项退化成 L1：距离乘 stride 换成像素，再按图像宽高归一化，
+                // 最后对 4 个方向取均值；目标距离不夹取值（bbox2dist 的默认分支）。
+                Tensor targetDist = BboxOps.Bbox2Dist(anchorValues, normalizedTargets);
+                Tensor scale = torch.tensor(
+                    new[] { 1f / _imageWidth, 1f / _imageHeight, 1f / _imageWidth, 1f / _imageHeight },
+                    dtype: ScalarType.Float32,
+                    device: prediction.device).view(1, 4);
+
+                Tensor predictionNormalized = predictionDist * strideValues * scale;
+                Tensor targetNormalized = targetDist * strideValues * scale;
+                Tensor l1 = (predictionNormalized - targetNormalized).abs().mean(new long[] { 1 }, true);
+                dflLoss = (l1 * weights).sum() / targetScoresSum;
+            }
+            else
+            {
+                Tensor targetDist = BboxOps.Bbox2Dist(anchorValues, normalizedTargets, _regressionMax - 1);
+
+                Tensor dflRows = DflLoss(predictionDist, targetDist, indices.shape[0]);
+                dflLoss = (dflRows.mean(new long[] { 1 }, true) * weights).sum() / targetScoresSum;
+            }
         }
 
         return (boxLoss, classLoss, dflLoss);
@@ -249,6 +282,7 @@ public sealed class YoloDetectionLoss : ILoss
     /// <summary>DFL 的交叉熵：目标距离按「左右两个整数格 + 权重」拆成软标签。</summary>
     private Tensor DflLoss(Tensor predictionDist, Tensor targetDist, long rows)
     {
+        // 64 通道按 [4, reg_max] 排，view 成「每行一个 (锚点, 方向)」的 16 个 bin 再算交叉熵
         Tensor prediction = predictionDist.view(rows * 4, _regressionMax);
         Tensor target = targetDist.view(rows * 4);
 
@@ -290,11 +324,19 @@ public sealed class YoloDetectionLoss : ILoss
         }
 
         _anchorCount = anchors.Length;
-        _anchorPoints = torch.tensor(anchorValues.ToArray(), new long[] { _anchorCount, 2 }, device: device);
-        _anchorCells = torch.tensor(cellValues.ToArray(), new long[] { 1, _anchorCount, 2 }, device: device);
-        _strides = torch.tensor(strideValues.ToArray(), new long[] { 1, _anchorCount, 1 }, device: device);
+
+        // 这些张量要跨步复用，必须从当前 DisposeScope 摘出来：
+        // 调用方（测试 / 以后的端到端训练）常常把每一步包在 NewDisposeScope 里，
+        // 否则第一步结束缓存就被释放，第二步拿到的是空句柄（Tensor invalid -- empty handle）
+        _anchorPoints = torch.tensor(anchorValues.ToArray(), new long[] { _anchorCount, 2 }, device: device)
+            .DetachFromDisposeScope();
+        _anchorCells = torch.tensor(cellValues.ToArray(), new long[] { 1, _anchorCount, 2 }, device: device)
+            .DetachFromDisposeScope();
+        _strides = torch.tensor(strideValues.ToArray(), new long[] { 1, _anchorCount, 1 }, device: device)
+            .DetachFromDisposeScope();
         _projection = torch.arange(_regressionMax, dtype: ScalarType.Float32, device: device)
-            .view(1, 1, 1, _regressionMax);
+            .view(1, 1, 1, _regressionMax)
+            .DetachFromDisposeScope();
         _gridDevice = device;
     }
 }

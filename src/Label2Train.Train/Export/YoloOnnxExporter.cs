@@ -35,13 +35,17 @@ public static class YoloOnnxExporter
     /// <summary>默认导出尺寸（与 ultralytics 一致）。</summary>
     public const int DefaultImageSize = 640;
 
+    /// <summary>无 NMS 导出保留的框数（官方 <c>max_det=300</c>）。</summary>
+    public const int DefaultEndToEndDetections = 300;
+
     /// <summary>按模型结构构图；<paramref name="imageHeight"/> / <paramref name="imageWidth"/> 必须是 32 的倍数。</summary>
     public static OnnxModel Build(
         YoloDetectionModel model,
         int imageHeight = DefaultImageSize,
         int imageWidth = DefaultImageSize,
         string inputName = DefaultInputName,
-        string outputName = DefaultOutputName)
+        string outputName = DefaultOutputName,
+        bool endToEnd = false)
     {
         ArgumentNullException.ThrowIfNull(model);
         ArgumentException.ThrowIfNullOrWhiteSpace(inputName);
@@ -99,6 +103,14 @@ public static class YoloOnnxExporter
         for (int level = 0; level < head.LevelCount; level++)
             headInputs[level] = layerOutputs[headSources[level]];
 
+        if (endToEnd && !head.UsesEndToEnd)
+        {
+            throw new InvalidOperationException(
+                "该检测头没有 one-to-one 分支（endToEnd=false 的模型），无法导出无 NMS 图。");
+        }
+
+        // 无 NMS 导出：先按 one-to-one 分支算出 [1, 4+nc, N]，再接 top-k 后处理成 [1, K, 6]
+        string detectOutput = endToEnd ? context.Next("model.detect.raw") : outputName;
         EmitDetect(
             context,
             $"model.{headIndex}",
@@ -107,10 +119,22 @@ public static class YoloOnnxExporter
             imageHeight,
             imageWidth,
             model.Strides,
-            outputName);
+            detectOutput,
+            oneToOne: endToEnd);
 
         (_, _, _, int anchors) = model.FeatureSizes(imageHeight, imageWidth);
-        builder.Output(outputName, OnnxDataType.Float, 1L, 4 + model.ClassCount, anchors);
+
+        if (endToEnd)
+        {
+            int keep = Math.Min(DefaultEndToEndDetections, anchors);
+            EmitNmsFreePostprocess(context, detectOutput, model.ClassCount, keep, outputName);
+            builder.Output(outputName, OnnxDataType.Float, 1L, keep, 6L);
+        }
+        else
+        {
+            builder.Output(outputName, OnnxDataType.Float, 1L, 4 + model.ClassCount, anchors);
+        }
+
         return new OnnxModel(builder.Build());
     }
 
@@ -121,7 +145,8 @@ public static class YoloOnnxExporter
         int imageHeight = DefaultImageSize,
         int imageWidth = DefaultImageSize,
         string inputName = DefaultInputName,
-        string outputName = DefaultOutputName)
+        string outputName = DefaultOutputName,
+        bool endToEnd = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -129,7 +154,7 @@ public static class YoloOnnxExporter
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
 
-        Build(model, imageHeight, imageWidth, inputName, outputName).Save(path);
+        Build(model, imageHeight, imageWidth, inputName, outputName, endToEnd).Save(path);
     }
 
     /// <summary>
@@ -316,6 +341,11 @@ public static class YoloOnnxExporter
             {
                 C3kModule c3k => EmitC3k(context, blockPrefix, c3k, current),
                 BottleneckModule bottleneck => EmitBottleneck(context, blockPrefix, bottleneck, current),
+
+                // attention=true（YOLO26 的 P5 层）：Sequential(Bottleneck, PSABlock)
+                YoloSequential sequential when module.UsesAttentionBlocks =>
+                    EmitAttentionBlock(context, blockPrefix, sequential, current),
+
                 _ => throw new NotSupportedException(
                     $"C3k2 内层块不支持 {module.Blocks[index].GetType().Name}（{blockPrefix}）。"),
             };
@@ -376,6 +406,30 @@ public static class YoloOnnxExporter
         return EmitConvModule(context, prefix + ".cv2", module.Cv2, merged);
     }
 
+    /// <summary>C3k2 里 attention 版内层块：<c>Sequential(Bottleneck, PSABlock)</c>，前缀按 <c>m.i.0</c> / <c>m.i.1</c>。</summary>
+    private static string EmitAttentionBlock(
+        YoloExportContext context,
+        string prefix,
+        YoloSequential module,
+        string input)
+    {
+        string current = input;
+
+        for (int index = 0; index < module.Items.Count; index++)
+        {
+            string itemPrefix = $"{prefix}.{index}";
+            current = module.Items[index] switch
+            {
+                BottleneckModule bottleneck => EmitBottleneck(context, itemPrefix, bottleneck, current),
+                PsaBlockModule psa => EmitPsaBlock(context, itemPrefix, psa, current),
+                _ => throw new NotSupportedException(
+                    $"C3k2 的 attention 内层块不支持 {module.Items[index].GetType().Name}（{itemPrefix}）。"),
+            };
+        }
+
+        return current;
+    }
+
     /// <summary>PSABlock：<c>x += attn(x)</c>，再 <c>x += ffn(x)</c>。</summary>
     private static string EmitPsaBlock(
         YoloExportContext context,
@@ -432,7 +486,10 @@ public static class YoloOnnxExporter
         string merged = context.Next(prefix + ".cat");
         context.Builder.Node("Concat", pooled, new[] { merged }, OnnxAttribute.Int("axis", 1));
 
-        return EmitConvModule(context, prefix + ".cv2", module.Cv2, merged);
+        string convolved = EmitConvModule(context, prefix + ".cv2", module.Cv2, merged);
+
+        // shortcut=True 且 c1 == c2（yolo26 层 9）：cv2 的输出再与输入相加
+        return module.UsesShortcut ? EmitAdd(context, prefix + ".add", convolved, input) : convolved;
     }
 
     private static string EmitConcat(
@@ -651,12 +708,25 @@ public static class YoloOnnxExporter
         int imageHeight,
         int imageWidth,
         IReadOnlyList<int> strides,
-        string outputName)
+        string outputName,
+        bool oneToOne = false)
     {
         int regressionMax = head.RegressionMax;
         int classCount = head.ClassCount;
-        Tensor dflWeight = context.State(prefix + ".dfl.conv.weight");
-        float[] weights = TorchInterop.ToArray(dflWeight);
+
+        // 双头模型的 one-to-one 分支是另一套卷积，权重键前缀也不同（one2one_cv2 / one2one_cv3）
+        string boxPrefix = oneToOne ? prefix + ".one2one_cv2" : prefix + ".cv2";
+        string classPrefix = oneToOne ? prefix + ".one2one_cv3" : prefix + ".cv3";
+        IReadOnlyList<YoloSequential> boxBranches = oneToOne
+            ? head.OneToOneBoxBranches ?? throw new InvalidOperationException("该检测头没有 one-to-one 分支。")
+            : head.BoxBranches;
+        IReadOnlyList<YoloSequential> classBranches = oneToOne
+            ? head.OneToOneClassBranches ?? throw new InvalidOperationException("该检测头没有 one-to-one 分支。")
+            : head.ClassBranches;
+
+        // reg_max = 1（YOLO26）没有 DFL：框分支的 4 个通道直接就是距离，不需要 softmax 加权和
+        Tensor? dflWeight = regressionMax > 1 ? context.State(prefix + ".dfl.conv.weight") : null;
+        float[] weights = dflWeight is null ? Array.Empty<float>() : TorchInterop.ToArray(dflWeight);
 
         string[] levelOutputs = new string[head.LevelCount];
 
@@ -668,48 +738,61 @@ public static class YoloOnnxExporter
             int anchors = rows * columns;
             string levelPrefix = $"{prefix}.level{level}";
 
-            string boxRaw = EmitSequential(context, $"{prefix}.cv2.{level}", head.BoxBranches[level], features[level]);
-            string classRaw = EmitSequential(context, $"{prefix}.cv3.{level}", head.ClassBranches[level], features[level]);
+            string boxRaw = EmitSequential(context, $"{boxPrefix}.{level}", boxBranches[level], features[level]);
+            string classRaw = EmitSequential(context, $"{classPrefix}.{level}", classBranches[level], features[level]);
 
             // [B,4R,h,w] → [B,4,R,hw] → [B,R,4,hw] → softmax → 加权和（单位：stride）
-            string reshapedBox = context.Next(levelPrefix + ".reshape.box");
-            context.Builder.Node(
-                "Reshape",
-                new[] { boxRaw, context.ConstantInt64(levelPrefix + ".shape.box", 0, 4, regressionMax, anchors) },
-                new[] { reshapedBox });
+            string distances;
+            if (dflWeight is null)
+            {
+                // 没有 DFL（reg_max = 1）：[B,4,h,w] 直接展成 [B,4,hw]
+                distances = context.Next(levelPrefix + ".distances");
+                context.Builder.Node(
+                    "Reshape",
+                    new[] { boxRaw, context.ConstantInt64(levelPrefix + ".shape.dist", 0, 4, anchors) },
+                    new[] { distances });
+            }
+            else
+            {
+                string reshapedBox = context.Next(levelPrefix + ".reshape.box");
+                context.Builder.Node(
+                    "Reshape",
+                    new[] { boxRaw, context.ConstantInt64(levelPrefix + ".shape.box", 0, 4, regressionMax, anchors) },
+                    new[] { reshapedBox });
 
-            string transposed = context.Next(levelPrefix + ".transpose");
-            context.Builder.Node(
-                "Transpose",
-                new[] { reshapedBox },
-                new[] { transposed },
-                OnnxAttribute.Ints("perm", 0, 2, 1, 3));
+                string transposed = context.Next(levelPrefix + ".transpose");
+                context.Builder.Node(
+                    "Transpose",
+                    new[] { reshapedBox },
+                    new[] { transposed },
+                    OnnxAttribute.Ints("perm", 0, 2, 1, 3));
 
-            string probabilities = context.Next(levelPrefix + ".softmax");
-            context.Builder.Node(
-                "Softmax",
-                new[] { transposed },
-                new[] { probabilities },
-                OnnxAttribute.Int("axis", 1));
+                string probabilities = context.Next(levelPrefix + ".softmax");
+                context.Builder.Node(
+                    "Softmax",
+                    new[] { transposed },
+                    new[] { probabilities },
+                    OnnxAttribute.Int("axis", 1));
 
-            string weighted = context.Next(levelPrefix + ".dfl.mul");
-            context.Builder.Node(
-                "Mul",
-                new[] { probabilities, context.ConstantFloat(levelPrefix + ".dfl.weight", dflWeight.shape, weights) },
-                new[] { weighted });
+                string weighted = context.Next(levelPrefix + ".dfl.mul");
+                context.Builder.Node(
+                    "Mul",
+                    new[] { probabilities, context.ConstantFloat(levelPrefix + ".dfl.weight", dflWeight.shape, weights) },
+                    new[] { weighted });
 
-            string summed = context.Next(levelPrefix + ".dfl.sum");
-            context.Builder.Node(
-                "ReduceSum",
-                new[] { weighted, context.ConstantInt64(levelPrefix + ".dfl.axes", 1) },
-                new[] { summed },
-                OnnxAttribute.Int("keepdims", 1));
+                string summed = context.Next(levelPrefix + ".dfl.sum");
+                context.Builder.Node(
+                    "ReduceSum",
+                    new[] { weighted, context.ConstantInt64(levelPrefix + ".dfl.axes", 1) },
+                    new[] { summed },
+                    OnnxAttribute.Int("keepdims", 1));
 
-            string distances = context.Next(levelPrefix + ".distances");
-            context.Builder.Node(
-                "Reshape",
-                new[] { summed, context.ConstantInt64(levelPrefix + ".shape.dist", 0, 4, anchors) },
-                new[] { distances });
+                distances = context.Next(levelPrefix + ".distances");
+                context.Builder.Node(
+                    "Reshape",
+                    new[] { summed, context.ConstantInt64(levelPrefix + ".shape.dist", 0, 4, anchors) },
+                    new[] { distances });
+            }
 
             // DFL 期望值的单位是 stride，乘以该层的 stride 才是像素距离。
             string pixels = context.Next(levelPrefix + ".pixels");
@@ -810,6 +893,148 @@ public static class YoloOnnxExporter
         context.Builder.Node(
             "Concat",
             levelOutputs,
+            new[] { outputName },
+            OnnxAttribute.Int("axis", 2));
+    }
+
+    /// <summary>
+    /// 无 NMS 后处理：<c>[1, 4+nc, N]</c> → <c>[1, K, 6]</c>（x1、y1、x2、y2、score、class）。
+    /// <para>
+    /// 官方 <c>head.postprocess</c> 的等价图：先取每个锚点的最高分类分数与类别，再对全部锚点 top-k。
+    /// 类别用 <c>TopK(k=1)</c> 顺带取索引（解释器也有 ArgMax，这里只是省一个 int64 输出路径）。
+    /// 注意 <c>output0</c> 前 4 通道是 cx、cy、w、h，官方无 NMS 输出是 xyxy，选完框还要换算。
+    /// </para>
+    /// </summary>
+    private static void EmitNmsFreePostprocess(
+        YoloExportContext context,
+        string raw,
+        int classCount,
+        int keep,
+        string outputName)
+    {
+        string boxes = context.Next("nmsfree.boxes");
+        string scores = context.Next("nmsfree.scores");
+        context.Builder.Node(
+            "Split",
+            new[] { raw, context.ConstantInt64("nmsfree.split", 4, classCount) },
+            new[] { boxes, scores },
+            OnnxAttribute.Int("axis", 1));
+
+        // 每个锚点的最高分类分数与对应类别（[1,1,N]）
+        string bestScore = context.Next("nmsfree.best.score");
+        string bestClass = context.Next("nmsfree.best.class");
+        context.Builder.Node(
+            "TopK",
+            new[] { scores, context.ConstantInt64("nmsfree.one", 1) },
+            new[] { bestScore, bestClass },
+            OnnxAttribute.Int("axis", 1),
+            OnnxAttribute.Int("largest", 1),
+            OnnxAttribute.Int("sorted", 1));
+
+        // 全锚点 top-k（[1,1,K]）
+        string topScore = context.Next("nmsfree.top.score");
+        string topIndex = context.Next("nmsfree.top.index");
+        context.Builder.Node(
+            "TopK",
+            new[] { bestScore, context.ConstantInt64("nmsfree.k", keep) },
+            new[] { topScore, topIndex },
+            OnnxAttribute.Int("axis", 2),
+            OnnxAttribute.Int("largest", 1),
+            OnnxAttribute.Int("sorted", 1));
+
+        // 4 个框通道各自按 top-k 索引取（[1,1,N] 对 [1,1,K]，形状天然对齐），得到 cx、cy、w、h 各 [1,1,K]。
+        // 也可以 Expand 索引成 [1,4,K] 再 GatherElements，但拆通道少一层广播、更好排查
+        var sides = new string[4];
+        for (int side = 0; side < sides.Length; side++)
+            sides[side] = context.Next($"nmsfree.side{side}");
+
+        context.Builder.Node(
+            "Split",
+            new[] { boxes, context.ConstantInt64("nmsfree.side.shape", 1, 1, 1, 1) },
+            sides,
+            OnnxAttribute.Int("axis", 1));
+
+        var tops = new string[4];
+        for (int side = 0; side < tops.Length; side++)
+        {
+            tops[side] = context.Next($"nmsfree.top{side}");
+            context.Builder.Node(
+                "GatherElements",
+                new[] { sides[side], topIndex },
+                new[] { tops[side] },
+                OnnxAttribute.Int("axis", 2));
+        }
+
+        // 官方无 NMS 输出是 xyxy，而 output0 的前 4 通道是 cx、cy、w、h，这里换算过来
+        string half = context.ConstantFloat("nmsfree.half", new long[] { 1 }, new[] { 0.5f });
+
+        string halfWidth = context.Next("nmsfree.w.half");
+        context.Builder.Node("Mul", new[] { tops[2], half }, new[] { halfWidth });
+
+        string halfHeight = context.Next("nmsfree.h.half");
+        context.Builder.Node("Mul", new[] { tops[3], half }, new[] { halfHeight });
+
+        var corners = new string[4];
+        corners[0] = context.Next("nmsfree.x1");
+        context.Builder.Node("Sub", new[] { tops[0], halfWidth }, new[] { corners[0] });
+
+        corners[1] = context.Next("nmsfree.y1");
+        context.Builder.Node("Sub", new[] { tops[1], halfHeight }, new[] { corners[1] });
+
+        corners[2] = context.Next("nmsfree.x2");
+        context.Builder.Node("Add", new[] { tops[0], halfWidth }, new[] { corners[2] });
+
+        corners[3] = context.Next("nmsfree.y2");
+        context.Builder.Node("Add", new[] { tops[1], halfHeight }, new[] { corners[3] });
+
+        // [1,4,K] → [1,K,4]
+        string boxRows = context.Next("nmsfree.boxes.rows");
+        string stacked = context.Next("nmsfree.boxes.stacked");
+        context.Builder.Node(
+            "Concat",
+            corners,
+            new[] { stacked },
+            OnnxAttribute.Int("axis", 1));
+
+        context.Builder.Node(
+            "Transpose",
+            new[] { stacked },
+            new[] { boxRows },
+            OnnxAttribute.Ints("perm", 0, 2, 1));
+
+        // 分数：[1,1,K] → [1,K,1]
+        string scoreRows = context.Next("nmsfree.score.rows");
+        context.Builder.Node(
+            "Transpose",
+            new[] { topScore },
+            new[] { scoreRows },
+            OnnxAttribute.Ints("perm", 0, 2, 1));
+
+        // 类别：[1,1,N] + [1,1,K] → GatherElements → [1,1,K] → [1,K,1] → float
+        string topClass = context.Next("nmsfree.class.top");
+        context.Builder.Node(
+            "GatherElements",
+            new[] { bestClass, topIndex },
+            new[] { topClass },
+            OnnxAttribute.Int("axis", 2));
+
+        string classRows = context.Next("nmsfree.class.rows");
+        context.Builder.Node(
+            "Transpose",
+            new[] { topClass },
+            new[] { classRows },
+            OnnxAttribute.Ints("perm", 0, 2, 1));
+
+        string classFloat = context.Next("nmsfree.class.float");
+        context.Builder.Node(
+            "Cast",
+            new[] { classRows },
+            new[] { classFloat },
+            OnnxAttribute.Int("to", 1));
+
+        context.Builder.Node(
+            "Concat",
+            new[] { boxRows, scoreRows, classFloat },
             new[] { outputName },
             OnnxAttribute.Int("axis", 2));
     }

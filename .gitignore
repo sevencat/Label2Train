@@ -11,6 +11,10 @@
 *.sln.docstates
 *.env
 
+# 预训练权重与转换产物（体积大，按需本地生成，见 tools/convert_yolo_weights.py）
+data/weights/*.pt
+data/weights/*.safetensors
+
 # User-specific files (MonoDevelop/Xamarin Studio)
 *.userprefs
 

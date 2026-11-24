@@ -91,19 +91,42 @@ public sealed class YoloDatasetTrainingRunner(
         YoloModelFamily family = YoloScales.ParseFamily(options.Family);
         YoloDetectionModel model = YoloArchitectures.Create(device, family, scale, classCount);
 
-        // 创建时按 640 设的分类 bias 先验，这里按真实输入尺寸再覆盖一次。
-        model.Head.ApplyClassBiasPrior(options.ImageSize);
+        // 有官方权重就热启动：30 张图从零训 v8，步数用光也出不来框
+        string? pretrained = YoloWeightSource.Resolve(family, scale);
+        YoloPretrainedReport? pretrainedReport = pretrained is null
+            ? null
+            : YoloPretrained.Apply(model, pretrained, device);
+
+        // 分类分支没被覆盖（类别数与检查点不同）时，才需要 bias 先验兜底；
+        // 否则会把官方已经训好的分类 bias 改成「全背景」先验
+        if (pretrainedReport is null
+            || pretrainedReport.Untouched.Any(key => key.Contains(".cv3.", StringComparison.Ordinal)))
+        {
+            // 创建时按 640 设的分类 bias 先验，这里按真实输入尺寸再覆盖一次。
+            model.Head.ApplyClassBiasPrior(options.ImageSize);
+        }
 
         Log(options, $"data  : {store.Id} · {trainSamples.Count} 张 · {classCount} 类 · {totalBoxes} 个框");
         Log(options, $"val   : {(validationSamples.Count == 0
             ? "(无验证集，mAP 恒为 0)"
             : $"{validationSamples.Count} 张{(autoValidation ? "（自动从训练集留出 20%）" : string.Empty)}")}");
         Log(options, $"model : {model.Architecture} ({YoloArchitectures.CountParameters(model)} params)");
+
+        if (pretrained is null)
+        {
+            Log(options, YoloWeightSource.Hint(family, scale));
+        }
+        else
+        {
+            Log(options, $"weight: {pretrained}");
+            Log(options, $"weight: {pretrainedReport!.Summary}");
+        }
         Log(options, $"device: {DeviceFactory.DescribeDetailed(computeDevice)}");
         Log(options, $"output: {output}");
 
         var optimizer = torch.optim.AdamW(model.parameters(), lr: options.LearningRate, weight_decay: 0.0005f);
-        var loss = new YoloDetectionLoss(options.ImageSize, options.ImageSize, classCount) { TrackComponents = true };
+        ILoss loss = YoloEndToEndDetectionLoss.CreateFor(
+            model, options.ImageSize, options.ImageSize, classCount, trackComponents: true);
 
         int batchesPerEpoch = Math.Max(1, (trainSamples.Count + options.BatchSize - 1) / options.BatchSize);
         int totalSteps = (options.Epochs * batchesPerEpoch) + 1;
@@ -452,7 +475,7 @@ public sealed class YoloDatasetTrainingRunner(
                             options.ImageSize,
                             options.ImageSize,
                             classCount,
-                            DetectHeadModule.DefaultRegressionMax,
+                            model.Head.RegressionMax,
                             confidenceThreshold: 0.001f,
                             iouThreshold: 0.7f));
 
